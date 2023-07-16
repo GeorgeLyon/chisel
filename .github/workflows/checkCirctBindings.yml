@@ -63,7 +63,7 @@ jobs:
             export CCACHE_DIR=$PWD/ccache
             cmake \
               --build $PWD/circt/build/circt/ \
-              --target CircelJNI --
+              --target check-circel CircelJNI --
       - name: Log ccache stats
         uses: devcontainers/ci@v0.3
         with:

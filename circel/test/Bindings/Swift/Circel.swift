@@ -1,8 +1,9 @@
-// RUN check-swift-bindings | FileCheck %s
+// RUN: circel-swift-bindings-test 2>&1 | FileCheck %s
 
 import CxxStdlib
-import Circel
+import MLIR_Bindings_Support
 
-Circel.IRBuilder builder = Circel.IRBuilder()
+let context = mlir.bindings.Context()
+let builder = mlir.bindings.IRBuilder(context)
 // CHECK: "Hello, IRBuilder!"
 builder.test()

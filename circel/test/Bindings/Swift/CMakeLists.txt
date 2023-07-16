@@ -1,11 +1,11 @@
 set(CMAKE_Swift_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/swift)
 enable_language(Swift)
 
-add_executable(circel-swift-bindings
+add_executable(circel-swift-bindings-test
   Circel.swift
 )
-target_link_libraries(circel-swift-bindings MLIRBindingsSupport)
-target_compile_options(circel-swift-bindings
+target_link_libraries(circel-swift-bindings-test MLIRBindingsSupport)
+target_compile_options(circel-swift-bindings-test
   PRIVATE
     # -emit-module
     "SHELL:-cxx-interoperability-mode=swift-5.9"

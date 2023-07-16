@@ -26,7 +26,7 @@
     "-DLLVM_EXTERNAL_PROJECTS=circt;circel",
     "-DLLVM_EXTERNAL_CIRCT_SOURCE_DIR=${workspaceFolder}/circt",
     "-DLLVM_EXTERNAL_CIRCEL_SOURCE_DIR=${workspaceFolder}/circel",
-    "-DCIRCT_LLHD_SIM_ENABLED=OFF"
+    "-DCIRCT_LLHD_SIM_ENABLED=OFF" // Not compatible with not building an LLVM target
   ],
   // Clangd Settings
   "clangd.path": "clangd-16",

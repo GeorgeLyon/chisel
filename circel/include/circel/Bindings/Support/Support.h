@@ -101,7 +101,7 @@ public:
   }
   void popLocation() { locationStack.pop_back(); }
 
-  void test() {
+  void test() const {
     auto attribute =
         Contextual<mlir::StringAttr>::get(context, "Hello, IRBuilder!");
     attribute.unwrap(context).dump();

@@ -27,7 +27,7 @@ config.suffixes = ['.td', '.mlir', '.ll', '.fir']
 config.test_source_root = os.path.dirname(__file__)
 
 # test_exec_root: The root path where tests should be run.
-config.test_exec_root = os.path.join(config.sil_obj_root, 'test')
+config.test_exec_root = os.path.join(config.circel_obj_root, 'test')
 
 config.substitutions.append(('%PATH%', config.environment['PATH']))
 config.substitutions.append(('%shlibext', config.llvm_shlib_ext))
@@ -46,14 +46,14 @@ config.excludes = ['Inputs', 'CMakeLists.txt', 'README.txt', 'LICENSE.txt']
 config.test_source_root = os.path.dirname(__file__)
 
 # test_exec_root: The root path where tests should be run.
-config.test_exec_root = os.path.join(config.sil_obj_root, 'test')
+config.test_exec_root = os.path.join(config.circel_obj_root, 'test')
 
 # Tweak the PATH to include the tools dir.
 llvm_config.with_environment('PATH', config.llvm_tools_dir, append_path=True)
 
-tool_dirs = [config.sil_tools_dir, config.circt_tools_dir, config.mlir_tools_dir, config.llvm_tools_dir]
+tool_dirs = [config.circel_tools_dir, config.circt_tools_dir, config.mlir_tools_dir, config.llvm_tools_dir]
 tools = [
-    'sil-opt'
+    'circel-swift-bindings-test'
 ]
 
 llvm_config.add_tool_substitutions(tools, tool_dirs)

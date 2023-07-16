@@ -6,7 +6,8 @@
       "label": "circel-build",
       "command": "build",
       "targets": [
-        "circt-lsp-server",
+        "install-circt-lsp-server",
+        "check-circel",
         "CircelJNI"
       ],
       "group": {
@@ -15,20 +16,6 @@
       },
       "problemMatcher": [],
       "detail": "Circel Default Build Task"
-    },
-    {
-      "type": "cmake",
-      "label": "check-circt",
-      "command": "build",
-      "targets": [
-        "check-circt"
-      ],
-      "group": {
-        "kind": "test",
-        "isDefault": true
-      },
-      "problemMatcher": [],
-      "detail": "Circel Default Test Task"
     }
   ]
 }
