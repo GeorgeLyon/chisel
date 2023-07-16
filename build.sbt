@@ -211,6 +211,11 @@ lazy val chiselSettings = Seq(
     "com.lihaoyi" %% "upickle" % "3.1.0"
   )
 ) ++ (
+  Seq(Compile, Runtime, Test)
+    .map(
+      _ / unmanagedClasspath += baseDirectory.value / "circt" / "build" / "circt" / "tools" / "circel" / "lib" / "Bindings" / "JNI" / "CircelJNI.jar"
+    )
+  ) ++ (
   // Tests from other projects may still run concurrently
   //  if we're not running with -DminimalResources.
   // Another option would be to experiment with:

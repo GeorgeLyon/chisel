@@ -1,0 +1,23 @@
+#!/bin/bash
+
+set -e
+
+# Extracts CMake arguments from VSCode settings and a cmake-tools-kits file. This is useful for running CMake the same way VSCode would. Some settings (like CMAKE_BUILD_TYPE) are ignored on purpose because we expect them to be set by the user of this script.
+
+# Example usage: `.devcontainer/extract cmake arguments | xargs cmake ...`
+
+PROJECT_ROOT=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )
+
+VSCODE_SETTINGS_FILE=${1:-$PROJECT_ROOT/.devcontainer/default/VSCode/settings.json}
+CMAKE_TOOLS_KITS_FILE=${2:-$PROJECT_ROOT/.devcontainer/default/cmake-tools-kits.json}
+CMAKE_TOOLS_KITS_INDEX=${3:-0}
+
+# Extract settings from VSCode settings
+cat "$VSCODE_SETTINGS_FILE" | \
+  sed 's@//.*@@' | \
+  sed "s@\${workspaceFolder}@$PROJECT_ROOT@" | \
+  jq -jr '"\"\(.["cmake.configureArgs"] | join("\" \""))\" -G \(.["cmake.generator"]) "'
+
+# Extract CMake Tools Settings
+cat "$CMAKE_TOOLS_KITS_FILE" | \
+  jq -r ".[$CMAKE_TOOLS_KITS_INDEX].compilers | \"-DCMAKE_C_COMPILER=\(.C) -DCMAKE_CXX_COMPILER=\(.CXX)\""

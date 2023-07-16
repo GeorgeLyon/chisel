@@ -13,7 +13,11 @@ class GCD extends Module {
   })
   val x = Reg(UInt(32.W))
   val y = Reg(UInt(32.W))
-  when(x > y) { x := x -% y }.otherwise { y := y -% x }
+  when(x > y) {
+    x := x -% y
+  }.otherwise {
+    y := y -% x
+  }
   when(io.loadValues) { x := io.a; y := io.b }
   io.result := x
   io.resultIsValid := y === 0.U

@@ -1,0 +1,72 @@
+name: Check Circt Bindings
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  initialize-devcontainer:
+    name: Initialize devcontainer
+    runs-on: ubuntu-22.04
+    
+    strategy:
+      matrix:
+        scala-version: ["2.13"]
+        devcontainer-name: ["default"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Get cache key parts
+        id: get-submodule-hashes
+        run: |
+          echo "circt-hash=$(git rev-parse @:./circt)" >> $GITHUB_OUTPUT
+          cd circt
+          echo "llvm-hash=$(git rev-parse @:./llvm)" >> $GITHUB_OUTPUT
+      - name: Cache ccache database
+        uses: actions/cache@v3
+        with: 
+          path: ccache
+          key: circt-ccache-database-${{ steps.get-submodule-hashes.outputs.llvm-hash }}-${{ steps.get-submodule-hashes.outputs.circt-hash }}
+          restore-keys: |
+            circt-ccache-database-${{ steps.get-submodule-hashes.outputs.llvm-hash }}-
+            circt-ccache-database-
+      - name: Make devcontainer '${{ matrix.devcontainer-name }}' singular
+        run: .devcontainer/make-devcontainer-singular ${{ matrix.devcontainer-name }}
+      - name: Initialize devcontainer
+        uses: devcontainers/ci@v0.3
+        with:
+          runCmd: |
+            export CCACHE_DIR=$PWD/ccache
+            ccache -sv
+      - name: Configure CMake Project
+        uses: devcontainers/ci@v0.3
+        with:
+          runCmd: |
+            export CCACHE_DIR=$PWD/ccache
+            .devcontainer/extract-cmake-arguments .vscode/settings.json .devcontainer/cmake-tools-kits.json | xargs cmake \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+              -S$PWD/circt/llvm/llvm \
+              -B$PWD/circt/build/circt
+      - name: Check targets
+        uses: devcontainers/ci@v0.3
+        with:
+          runCmd: |
+            export CCACHE_DIR=$PWD/ccache
+            cmake \
+              --build $PWD/circt/build/circt/ \
+              --target CircelJNI --
+      - name: Log ccache stats
+        uses: devcontainers/ci@v0.3
+        with:
+          runCmd: |
+            export CCACHE_DIR=$PWD/ccache
+            ccache -sv
