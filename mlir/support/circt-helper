@@ -233,7 +233,7 @@ case "$CHECK_METADATA_CONSISTENCY" in
     fi
     ;;
   "OFF")
-echo "▸ Done! ◂"
+    echo "▸ Done! ◂"
     ;;
   *)
     echo "Unexpected value for CHECK_METADATA_CONSISTENCY: $CHECK_METADATA_CONSISTENCY"
