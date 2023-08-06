@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
@@ -82,18 +82,18 @@ assert_repo_is_clean() {
 # Checkout or update (fetch) the CIRCT repo
 CHECKOUT_DIR="$SUPPORT_DIR/.checkout"
 if [ ! -d "$CHECKOUT_DIR" ]; then 
-  echo "▸ Cloning CIRCT repo to $CHECKOUT_DIR…"
+  echo "▸ Cloning CIRCT repo to ${CHECKOUT_DIR}…"
   git clone --recurse-submodules https://github.com/llvm/circt.git "$CHECKOUT_DIR"
   git -C "$CHECKOUT_DIR" config --local advice.detachedHead false
 else 
-  echo "▸ Updating CIRCT repo in $CHECKOUT_DIR…"
+  echo "▸ Updating CIRCT repo in ${CHECKOUT_DIR}…"
   assert_repo_is_clean "$CHECKOUT_DIR" .
   git -C "$CHECKOUT_DIR" fetch --all
 fi
 
 # Clear the snapshots directory in preparation for creating new snapshots
 SNAPSHOTS_DIR="$SUPPORT_DIR/.snapshots"
-echo "▸ Deleting existing snapshots in $SNAPSHOTS_DIR…"
+echo "▸ Deleting existing snapshots in ${SNAPSHOTS_DIR}…"
 rm -rf "$SNAPSHOTS_DIR"
 mkdir "$SNAPSHOTS_DIR"
 
@@ -181,7 +181,7 @@ diff_helper() {
     popd > /dev/null
   }
   # Trim file timestamps
-  do_diff "$@" | sed -E 's@^([+-]+ [^\t]*)\t[0-9-]+ [0-9:.]+ [0-9+-]+$@\1@'
+  do_diff "$@" | sed -E 's@^([+-]+ [^\t]*)\t[0-9-]+ [0-9:.]+( [0-9+-]+)?$@\1@'
 }
 
 # At this point, the "input", "source" and "target" snapshots have been created. All that remains is to create the "output" snapshot. To do this, we copy the "target" snapshot, and apply the diff from the "input" to the "source" snapshot.
@@ -217,7 +217,7 @@ case "$CHECK_METADATA_CONSISTENCY" in
   "ON")
     echo "▸ Checking metadata consistency…"
     # If we are running check-metadata-consistency, then the target SHA was set to the source SHA and neither the managed sources nor the metadata should have changed.
-    git -C "$REPO_DIR" diff --exit-code -- "$MLIR_DIR"{llvm,circt,support/metadata}
+    git -C "$REPO_DIR" diff --exit-code -- "$MLIR_DIR/"{llvm,circt,support/metadata}
     ;;
   "OFF")
     ;;
