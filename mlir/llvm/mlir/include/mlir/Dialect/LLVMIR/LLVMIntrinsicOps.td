@@ -120,17 +120,21 @@ def LLVM_AbsOp : LLVM_OneResultIntrOp<"abs", [], [0], [Pure]> {
   }];
 }
 
-def LLVM_IsFPClass : LLVM_OneResultIntrOp<"is.fpclass", [], [0], [Pure]> {
-  let arguments = (ins LLVM_ScalarOrVectorOf<LLVM_AnyFloat>:$in, I32Attr:$bit);
+def LLVM_IsFPClass : LLVM_OneResultIntrOp<"is.fpclass", [], [0], [Pure],
+                                          /*requiresFastmath=*/1> {
+  let arguments = (ins LLVM_ScalarOrVectorOf<LLVM_AnyFloat>:$in,
+                       I32Attr:$kinds,
+                       DefaultValuedAttr<LLVM_FastmathFlagsAttr, "{}">:$fastmathFlags);
   string mlirBuilder = [{
     auto op = $_builder.create<$_qualCppClassName>($_location,
-      $_resultType, $in, $_int_attr($bit));
-      $res = op;
+      $_resultType, $in, $_int_attr($kinds), nullptr);
+    moduleImport.setFastmathFlagsAttr(inst, op);
+    $res = op;
   }];
   string llvmBuilder = [{
     auto *inst = createIntrinsicCall(
       builder, llvm::Intrinsic::}] # llvmEnumName # [{,
-      {$in, builder.getInt32(op.getBit())},
+      {$in, builder.getInt32(op.getKinds())},
       }] # declTypes # [{);
     $res = inst;
   }];
@@ -718,6 +722,8 @@ def LLVM_vector_reduce_xor : LLVM_VecReductionI<"xor">;
 
 def LLVM_vector_reduce_fmax : LLVM_VecReductionF<"fmax">;
 def LLVM_vector_reduce_fmin : LLVM_VecReductionF<"fmin">;
+def LLVM_vector_reduce_fmaximum : LLVM_VecReductionF<"fmaximum">;
+def LLVM_vector_reduce_fminimum : LLVM_VecReductionF<"fminimum">;
 
 def LLVM_vector_reduce_fadd : LLVM_VecReductionAccF<"fadd">;
 def LLVM_vector_reduce_fmul : LLVM_VecReductionAccF<"fmul">;
@@ -1075,31 +1081,6 @@ def LLVM_vector_extract
     uint64_t getResVectorBitWidth() {
       return getVectorBitWidth(getRes().getType());
     }
-  }];
-}
-
-//===--------------------------------------------------------------------===//
-// CallIntrinsicOp
-//===--------------------------------------------------------------------===//
-
-def LLVM_CallIntrinsicOp
-    : LLVM_Op<"call_intrinsic",
-              [DeclareOpInterfaceMethods<FastmathFlagsInterface>]> {
-  let summary = "Call to an LLVM intrinsic function.";
-  let description = [{
-    Call the specified llvm intrinsic. If the intrinsic is overloaded, use
-    the MLIR function type of this op to determine which intrinsic to call.
-    }];
-  let arguments = (ins StrAttr:$intrin, Variadic<LLVM_Type>:$args,
-                       DefaultValuedAttr<LLVM_FastmathFlagsAttr,
-                                         "{}">:$fastmathFlags);
-  let results = (outs Variadic<LLVM_Type>:$results);
-  let llvmBuilder = [{
-    return convertCallLLVMIntrinsicOp(op, builder, moduleTranslation);
-  }];
-  let assemblyFormat = [{
-    $intrin `(` $args `)` `:` functional-type($args, $results)
-      custom<LLVMOpAttrs>(attr-dict)
   }];
 }
 

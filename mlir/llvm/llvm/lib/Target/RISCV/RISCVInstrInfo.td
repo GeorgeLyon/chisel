@@ -237,7 +237,7 @@ def InsnDirectiveOpcode : AsmOperandClass {
   let PredicateMethod = "isImm";
 }
 
-def uimm6 : Operand<XLenVT> {
+def uimm6 : Operand<XLenVT>, ImmLeaf<XLenVT, [{return isUInt<6>(Imm);}]> {
   let ParserMatchClass = UImmAsmOperand<6>;
   let DecoderMethod = "decodeUImmOperand<6>";
   let OperandType = "OPERAND_UIMM6";
@@ -689,7 +689,7 @@ def SLLI : Shift_ri<0b00000, 0b001, "slli">;
 def SRLI : Shift_ri<0b00000, 0b101, "srli">;
 def SRAI : Shift_ri<0b01000, 0b101, "srai">;
 
-def ADD  : ALU_rr<0b0000000, 0b000, "add", /*Commutable*/1>,
+def ADD  : ALU_rr<0b0000000, 0b000, "add", Commutable=1>,
            Sched<[WriteIALU, ReadIALU, ReadIALU]>;
 def SUB  : ALU_rr<0b0100000, 0b000, "sub">,
            Sched<[WriteIALU, ReadIALU, ReadIALU]>;
@@ -701,15 +701,15 @@ def SLT  : ALU_rr<0b0000000, 0b010, "slt">,
 def SLTU : ALU_rr<0b0000000, 0b011, "sltu">,
            Sched<[WriteIALU, ReadIALU, ReadIALU]>;
 }
-def XOR  : ALU_rr<0b0000000, 0b100, "xor", /*Commutable*/1>,
+def XOR  : ALU_rr<0b0000000, 0b100, "xor", Commutable=1>,
            Sched<[WriteIALU, ReadIALU, ReadIALU]>;
 def SRL  : ALU_rr<0b0000000, 0b101, "srl">,
            Sched<[WriteShiftReg, ReadShiftReg, ReadShiftReg]>;
 def SRA  : ALU_rr<0b0100000, 0b101, "sra">,
            Sched<[WriteShiftReg, ReadShiftReg, ReadShiftReg]>;
-def OR   : ALU_rr<0b0000000, 0b110, "or", /*Commutable*/1>,
+def OR   : ALU_rr<0b0000000, 0b110, "or", Commutable=1>,
            Sched<[WriteIALU, ReadIALU, ReadIALU]>;
-def AND  : ALU_rr<0b0000000, 0b111, "and", /*Commutable*/1>,
+def AND  : ALU_rr<0b0000000, 0b111, "and", Commutable=1>,
            Sched<[WriteIALU, ReadIALU, ReadIALU]>;
 
 let hasSideEffects = 1, mayLoad = 0, mayStore = 0 in {
@@ -803,7 +803,7 @@ def SLLIW : ShiftW_ri<0b0000000, 0b001, "slliw">;
 def SRLIW : ShiftW_ri<0b0000000, 0b101, "srliw">;
 def SRAIW : ShiftW_ri<0b0100000, 0b101, "sraiw">;
 
-def ADDW  : ALUW_rr<0b0000000, 0b000, "addw", /*Commutable*/1>,
+def ADDW  : ALUW_rr<0b0000000, 0b000, "addw", Commutable=1>,
             Sched<[WriteIALU32, ReadIALU32, ReadIALU32]>;
 def SUBW  : ALUW_rr<0b0100000, 0b000, "subw">,
             Sched<[WriteIALU32, ReadIALU32, ReadIALU32]>;
@@ -1234,6 +1234,8 @@ def zexti32 : ComplexPattern<i64, 1, "selectZExtBits<32>">;
 def zexti16 : ComplexPattern<XLenVT, 1, "selectZExtBits<16>">;
 def zexti8 : ComplexPattern<XLenVT, 1, "selectZExtBits<8>">;
 
+def ext : PatFrags<(ops node:$A), [(sext node:$A), (zext node:$A)]>;
+
 class binop_oneuse<SDPatternOperator operator>
     : PatFrag<(ops node:$A, node:$B),
               (operator node:$A, node:$B), [{
@@ -1259,6 +1261,7 @@ class unop_oneuse<SDPatternOperator operator>
 def sext_oneuse   : unop_oneuse<sext>;
 def zext_oneuse   : unop_oneuse<zext>;
 def anyext_oneuse : unop_oneuse<anyext>;
+def ext_oneuse    : unop_oneuse<ext>;
 def fpext_oneuse  : unop_oneuse<any_fpextend>;
 
 /// Simple arithmetic operations
@@ -1929,22 +1932,34 @@ def : Pat<(binop_allwusers<add> GPR:$rs1, (AddiPair:$rs2)),
 // Standard extensions
 //===----------------------------------------------------------------------===//
 
+// Multiply and Division
 include "RISCVInstrInfoM.td"
+
+// Atomic
 include "RISCVInstrInfoA.td"
+
+// Scalar FP
 include "RISCVInstrInfoF.td"
 include "RISCVInstrInfoD.td"
-include "RISCVInstrInfoC.td"
-include "RISCVInstrInfoZb.td"
-include "RISCVInstrInfoZc.td"
-include "RISCVInstrInfoZk.td"
-include "RISCVInstrInfoV.td"
-include "RISCVInstrInfoZvfbf.td"
-include "RISCVInstrInfoZvk.td"
-include "RISCVInstrInfoZfa.td"
-include "RISCVInstrInfoZfbfmin.td"
 include "RISCVInstrInfoZfh.td"
+include "RISCVInstrInfoZfbfmin.td"
+include "RISCVInstrInfoZfa.td"
+
+// Scalar bitmanip and cryptography
+include "RISCVInstrInfoZb.td"
+include "RISCVInstrInfoZk.td"
+
+// Vector
+include "RISCVInstrInfoV.td"
+include "RISCVInstrInfoZvk.td"
+
+// Integer
 include "RISCVInstrInfoZicbo.td"
 include "RISCVInstrInfoZicond.td"
+
+// Compressed
+include "RISCVInstrInfoC.td"
+include "RISCVInstrInfoZc.td"
 
 //===----------------------------------------------------------------------===//
 // Vendor extensions

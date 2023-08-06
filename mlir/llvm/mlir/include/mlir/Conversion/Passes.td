@@ -559,21 +559,6 @@ def ConvertIndexToLLVMPass : Pass<"convert-index-to-llvm"> {
 }
 
 //===----------------------------------------------------------------------===//
-// LinalgToLLVM
-//===----------------------------------------------------------------------===//
-
-def ConvertLinalgToLLVMPass : Pass<"convert-linalg-to-llvm", "ModuleOp"> {
-  let summary = "Convert the operations from the linalg dialect into the LLVM "
-                "dialect";
-  let dependentDialects = ["scf::SCFDialect", "LLVM::LLVMDialect"];
-  let options = [
-     Option<"useOpaquePointers", "use-opaque-pointers", "bool",
-                /*default=*/"true", "Generate LLVM IR using opaque pointers "
-                "instead of typed pointers">
-  ];
-}
-
-//===----------------------------------------------------------------------===//
 // LinalgToStandard
 //===----------------------------------------------------------------------===//
 
@@ -1038,6 +1023,35 @@ def TosaToTensor : Pass<"tosa-to-tensor"> {
 }
 
 //===----------------------------------------------------------------------===//
+// UBToLLVM
+//===----------------------------------------------------------------------===//
+
+def UBToLLVMConversionPass : Pass<"convert-ub-to-llvm"> {
+  let summary = "Convert UB dialect to LLVM dialect";
+  let description = [{
+    This pass converts supported UB ops to LLVM dialect instructions.
+  }];
+  let dependentDialects = ["LLVM::LLVMDialect"];
+  let options = [
+    Option<"indexBitwidth", "index-bitwidth", "unsigned",
+           /*default=kDeriveIndexBitwidthFromDataLayout*/"0",
+           "Bitwidth of the index type, 0 to use size of machine word">,
+  ];
+}
+
+//===----------------------------------------------------------------------===//
+// UBToSPIRV
+//===----------------------------------------------------------------------===//
+
+def UBToSPIRVConversionPass : Pass<"convert-ub-to-spirv"> {
+  let summary = "Convert UB dialect to SPIR-V dialect";
+  let description = [{
+    This pass converts supported UB ops to SPIR-V dialect ops.
+  }];
+  let dependentDialects = ["spirv::SPIRVDialect"];
+}
+
+//===----------------------------------------------------------------------===//
 // VectorToGPU
 //===----------------------------------------------------------------------===//
 
@@ -1092,6 +1106,22 @@ def ConvertVectorToArmSME : Pass<"convert-vector-to-arm-sme"> {
     operations.
   }];
   let dependentDialects = ["arm_sme::ArmSMEDialect"];
+}
+
+//===----------------------------------------------------------------------===//
+// ArmSMEToSCF
+//===----------------------------------------------------------------------===//
+
+def ConvertArmSMEToSCF : Pass<"convert-arm-sme-to-scf"> {
+  let summary = "Lower the operations from the ArmSME dialect into the SCF "
+                "dialect";
+  let constructor = "mlir::createConvertArmSMEToSCFPass()";
+  let dependentDialects = [
+    "scf::SCFDialect",
+    "arith::ArithDialect",
+    "vector::VectorDialect",
+    "arm_sme::ArmSMEDialect"
+  ];
 }
 
 //===----------------------------------------------------------------------===//

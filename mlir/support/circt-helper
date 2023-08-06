@@ -213,6 +213,9 @@ rsync -avqt --delete{,-excluded} \
 rsync -avqt --delete{,-excluded} \
   "$OUTPUT_SNAPSHOT_DIR/circt/" "$MLIR_DIR/circt"
 
+# llvm and circt inherit the gitignore settings from the repo root, so we force-add all the sources in the output snapshot to ensure they make it in the index.
+find "$OUTPUT_SNAPSHOT_DIR" -type f | sed "s@^$OUTPUT_SNAPSHOT_DIR/@$MLIR_DIR/@" | xargs git add -f
+
 # Capture the diff from output to target, since the line numbers from the source diff might have been offset in the target snapshot. Also, we split the diff into two for easier comprehension.
 diff_helper "$SNAPSHOTS_DIR" {target,output}/llvm > "$METADATA_DIR/llvm.diff"
 diff_helper "$SNAPSHOTS_DIR" {target,output}/circt > "$METADATA_DIR/circt.diff"

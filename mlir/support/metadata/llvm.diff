@@ -1,7 +1,7 @@
 diff -ruN target/llvm/llvm/cmake/modules/HandleLLVMOptions.cmake output/llvm/llvm/cmake/modules/HandleLLVMOptions.cmake
 --- target/llvm/llvm/cmake/modules/HandleLLVMOptions.cmake
 +++ output/llvm/llvm/cmake/modules/HandleLLVMOptions.cmake
-@@ -1000,7 +1000,7 @@
+@@ -1005,7 +1005,7 @@
    # Limit to clang and gcc so far. Add compilers supporting this option.
    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR
        CMAKE_CXX_COMPILER_ID STREQUAL "GNU")

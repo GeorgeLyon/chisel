@@ -536,12 +536,14 @@ def LLVM_FPTruncOp : LLVM_CastOp<"fptrunc", "FPTrunc",
 def LLVM_InvokeOp : LLVM_Op<"invoke", [
                       AttrSizedOperandSegments,
                       DeclareOpInterfaceMethods<BranchOpInterface>,
-                      DeclareOpInterfaceMethods<CallOpInterface>, Terminator]> {
+                      DeclareOpInterfaceMethods<CallOpInterface>,
+                      DeclareOpInterfaceMethods<BranchWeightOpInterface>,
+                      Terminator]> {
   let arguments = (ins OptionalAttr<FlatSymbolRefAttr>:$callee,
                    Variadic<LLVM_Type>:$callee_operands,
                    Variadic<LLVM_Type>:$normalDestOperands,
                    Variadic<LLVM_Type>:$unwindDestOperands,
-                   OptionalAttr<ElementsAttr>:$branch_weights);
+                   OptionalAttr<DenseI32ArrayAttr>:$branch_weights);
   let results = (outs Variadic<LLVM_Type>);
   let successors = (successor AnySuccessor:$normalDest,
                               AnySuccessor:$unwindDest);
@@ -582,7 +584,8 @@ def LLVM_LandingpadOp : LLVM_Op<"landingpad"> {
 def LLVM_CallOp : LLVM_MemAccessOpBase<"call",
                     [DeclareOpInterfaceMethods<FastmathFlagsInterface>,
                      DeclareOpInterfaceMethods<CallOpInterface>,
-                     DeclareOpInterfaceMethods<SymbolUserOpInterface>]> {
+                     DeclareOpInterfaceMethods<SymbolUserOpInterface>,
+                     DeclareOpInterfaceMethods<BranchWeightOpInterface>]> {
   let summary = "Call to an LLVM function.";
   let description = [{
     In LLVM IR, functions may return either 0 or 1 value. LLVM IR dialect
@@ -613,10 +616,10 @@ def LLVM_CallOp : LLVM_MemAccessOpBase<"call",
   }];
 
   dag args = (ins OptionalAttr<FlatSymbolRefAttr>:$callee,
-                  Variadic<LLVM_Type>,
+                  Variadic<LLVM_Type>:$callee_operands,
                   DefaultValuedAttr<LLVM_FastmathFlagsAttr,
                                    "{}">:$fastmathFlags,
-                  OptionalAttr<ElementsAttr>:$branch_weights);
+                  OptionalAttr<DenseI32ArrayAttr>:$branch_weights);
   // Append the aliasing related attributes defined in LLVM_MemAccessOpBase.
   let arguments = !con(args, aliasAttrs);
   let results = (outs Optional<LLVM_Type>:$result);
@@ -847,12 +850,14 @@ def LLVM_BrOp : LLVM_TerminatorOp<"br",
   ];
 }
 def LLVM_CondBrOp : LLVM_TerminatorOp<"cond_br",
-    [AttrSizedOperandSegments, DeclareOpInterfaceMethods<BranchOpInterface>,
+    [AttrSizedOperandSegments,
+     DeclareOpInterfaceMethods<BranchOpInterface>,
+     DeclareOpInterfaceMethods<BranchWeightOpInterface>,
      Pure]> {
   let arguments = (ins I1:$condition,
                    Variadic<LLVM_Type>:$trueDestOperands,
                    Variadic<LLVM_Type>:$falseDestOperands,
-                   OptionalAttr<ElementsAttr>:$branch_weights,
+                   OptionalAttr<DenseI32ArrayAttr>:$branch_weights,
                    OptionalAttr<LoopAnnotationAttr>:$loop_annotation);
   let successors = (successor AnySuccessor:$trueDest, AnySuccessor:$falseDest);
   let assemblyFormat = [{
@@ -874,7 +879,7 @@ def LLVM_CondBrOp : LLVM_TerminatorOp<"cond_br",
             falseOperands);
   }]>,
   OpBuilder<(ins "Value":$condition, "ValueRange":$trueOperands, "ValueRange":$falseOperands,
-    "ElementsAttr":$branchWeights, "Block *":$trueDest, "Block *":$falseDest),
+    "DenseI32ArrayAttr":$branchWeights, "Block *":$trueDest, "Block *":$falseDest),
   [{
       build($_builder, $_state, condition, trueOperands, falseOperands, branchWeights,
       {}, trueDest, falseDest);
@@ -934,7 +939,9 @@ def LLVM_UnreachableOp : LLVM_TerminatorOp<"unreachable"> {
 }
 
 def LLVM_SwitchOp : LLVM_TerminatorOp<"switch",
-    [AttrSizedOperandSegments, DeclareOpInterfaceMethods<BranchOpInterface>,
+    [AttrSizedOperandSegments,
+     DeclareOpInterfaceMethods<BranchOpInterface>,
+     DeclareOpInterfaceMethods<BranchWeightOpInterface>,
      Pure]> {
   let arguments = (ins
     AnyInteger:$value,
@@ -942,7 +949,7 @@ def LLVM_SwitchOp : LLVM_TerminatorOp<"switch",
     VariadicOfVariadic<AnyType, "case_operand_segments">:$caseOperands,
     OptionalAttr<AnyIntElementsAttr>:$case_values,
     DenseI32ArrayAttr:$case_operand_segments,
-    OptionalAttr<ElementsAttr>:$branch_weights
+    OptionalAttr<DenseI32ArrayAttr>:$branch_weights
   );
   let successors = (successor
     AnySuccessor:$defaultDestination,
@@ -1065,37 +1072,6 @@ def LLVM_AddressOfOp : LLVM_Op<"mlir.addressof",
   }];
 
   let assemblyFormat = "$global_name attr-dict `:` qualified(type($res))";
-}
-
-def LLVM_MetadataOp : LLVM_Op<"metadata", [
-   NoRegionArguments, NoTerminator, SymbolTable, Symbol
-]> {
-  let arguments = (ins
-    SymbolNameAttr:$sym_name
-  );
-  let summary = "LLVM dialect metadata.";
-  let description = [{
-    llvm.metadata op defines one or more metadata nodes.
-
-    Example:
-    ```mlir
-    llvm.metadata @metadata {
-      llvm.access_group @group1
-      llvm.access_group @group2
-    }
-    ```
-  }];
-  let regions = (region SizedRegion<1>:$body);
-
-  let skipDefaultBuilders = 1;
-
-  let builders = [
-    OpBuilder<(ins "StringRef":$symName,
-        CArg<"bool", "true">:$createBodyBlock,
-        CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes)>
-  ];
-
-  let hasCustomAssemblyFormat = 1;
 }
 
 def LLVM_GlobalOp : LLVM_Op<"mlir.global",
@@ -1781,6 +1757,32 @@ def LLVM_InlineAsmOp : LLVM_Op<"inline_asm", []> {
       return "elementtype";
     }
   }];
+}
+
+//===--------------------------------------------------------------------===//
+// CallIntrinsicOp
+//===--------------------------------------------------------------------===//
+
+def LLVM_CallIntrinsicOp
+    : LLVM_Op<"call_intrinsic",
+              [DeclareOpInterfaceMethods<FastmathFlagsInterface>]> {
+  let summary = "Call to an LLVM intrinsic function.";
+  let description = [{
+    Call the specified llvm intrinsic. If the intrinsic is overloaded, use
+    the MLIR function type of this op to determine which intrinsic to call.
+  }];
+  let arguments = (ins StrAttr:$intrin, Variadic<LLVM_Type>:$args,
+                       DefaultValuedAttr<LLVM_FastmathFlagsAttr,
+                                         "{}">:$fastmathFlags);
+  let results = (outs Optional<LLVM_Type>:$results);
+  let llvmBuilder = [{
+    return convertCallLLVMIntrinsicOp(op, builder, moduleTranslation);
+  }];
+  let assemblyFormat = [{
+    $intrin `(` $args `)` `:` functional-type($args, $results) attr-dict
+  }];
+
+  let hasVerifier = 1;
 }
 
 #endif // LLVMIR_OPS

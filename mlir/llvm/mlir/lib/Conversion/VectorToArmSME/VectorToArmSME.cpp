@@ -9,6 +9,7 @@
 #include "mlir/Conversion/VectorToArmSME/VectorToArmSME.h"
 
 #include "mlir/Dialect/ArmSME/IR/ArmSME.h"
+#include "mlir/Dialect/ArmSME/Utils/Utils.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/Support/Casting.h"
 
@@ -27,8 +28,7 @@ static bool isSplatZero(Type elemType, DenseElementsAttr val) {
 
 namespace {
 
-/// Look at `vector.transfer_write` operations and convert suitable candidates
-/// to ArmSME operations, e.g.:
+/// Conversion pattern for vector.transfer_write. Currently only supports:
 ///
 ///    %cst = arith.constant dense<0> : vector<[16]x[16]xi8>
 ///    vector.transfer_write %cst, %arg0 : vector<[16]x[16]xi8>, memref<?x?xi8>
@@ -39,6 +39,8 @@ namespace {
 ///    arm_sme.tile_store %arg0[%c0, %c0], %0 : memref<?x?xi8>,
 ///    vector<[16]x[16]xi8>
 ///
+/// The conversion from arith.constant dense<0> to arm_sme.zero is done in
+/// ConstantOpToArmSMELowering.
 struct TransferWriteToArmSMELowering
     : public OpRewritePattern<vector::TransferWriteOp> {
   using OpRewritePattern<vector::TransferWriteOp>::OpRewritePattern;
@@ -55,8 +57,6 @@ struct TransferWriteToArmSMELowering
     if (vType.getScalableDims().size() != 2)
       return failure();
 
-    auto loc = writeOp.getLoc();
-
     if (!llvm::isa<MemRefType>(writeOp.getSource().getType()))
       return failure();
 
@@ -68,10 +68,69 @@ struct TransferWriteToArmSMELowering
     if (!denseAttr || !isSplatZero(vType.getElementType(), denseAttr))
       return failure();
 
-    auto zero = rewriter.create<arm_sme::ZeroOp>(loc, vType);
+    rewriter.replaceOpWithNewOp<arm_sme::TileStoreOp>(
+        writeOp, writeOp.getVector(), writeOp.getSource(),
+        writeOp.getIndices());
+    return success();
+  }
+};
+
+/// Conversion pattern for vector.load.
+struct VectorLoadToArmSMELowering : public OpRewritePattern<vector::LoadOp> {
+  using OpRewritePattern<vector::LoadOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(vector::LoadOp load,
+                                PatternRewriter &rewriter) const override {
+    if (!arm_sme::isValidSMETileVectorType(load.getVectorType()))
+      return failure();
+
+    rewriter.replaceOpWithNewOp<arm_sme::TileLoadOp>(
+        load, load.getVectorType(), load.getBase(), load.getIndices());
+
+    return success();
+  }
+};
+
+/// Conversion pattern for vector.store.
+struct VectorStoreToArmSMELowering : public OpRewritePattern<vector::StoreOp> {
+  using OpRewritePattern<vector::StoreOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(vector::StoreOp store,
+                                PatternRewriter &rewriter) const override {
+    if (!arm_sme::isValidSMETileVectorType(store.getVectorType()))
+      return failure();
 
     rewriter.replaceOpWithNewOp<arm_sme::TileStoreOp>(
-        writeOp, zero, writeOp.getSource(), writeOp.getIndices());
+        store, store.getValueToStore(), store.getBase(), store.getIndices());
+
+    return success();
+  }
+};
+
+/// Conversion pattern for dense arith.constant.
+struct ConstantOpToArmSMELowering : public OpRewritePattern<arith::ConstantOp> {
+  using OpRewritePattern<arith::ConstantOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(arith::ConstantOp constantOp,
+                                PatternRewriter &rewriter) const final {
+    auto vType = dyn_cast<VectorType>(constantOp.getType());
+    if (!vType)
+      return failure();
+    if (vType.getRank() != 2)
+      return failure();
+    if (vType.getShape() != ArrayRef<int64_t>({kMinNumElts, kMinNumElts}))
+      return failure();
+    if (vType.getElementType() != rewriter.getI8Type())
+      return failure();
+    if (vType.getScalableDims().size() != 2)
+      return failure();
+
+    auto denseAttr = dyn_cast<DenseElementsAttr>(constantOp.getValueAttr());
+    if (!denseAttr || !isSplatZero(vType.getElementType(), denseAttr))
+      return failure();
+
+    rewriter.replaceOpWithNewOp<arm_sme::ZeroOp>(constantOp, vType);
+
     return success();
   }
 };
@@ -80,5 +139,6 @@ struct TransferWriteToArmSMELowering
 
 void mlir::populateVectorToArmSMEPatterns(RewritePatternSet &patterns,
                                           MLIRContext &ctx) {
-  patterns.add<TransferWriteToArmSMELowering>(&ctx);
+  patterns.add<TransferWriteToArmSMELowering, VectorLoadToArmSMELowering,
+               VectorStoreToArmSMELowering, ConstantOpToArmSMELowering>(&ctx);
 }

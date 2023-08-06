@@ -18,7 +18,7 @@ llvm.func @intrinsics(%arg0: f32, %arg1: f32, %arg2: vector<8xf32>, %arg3: !llvm
 // CHECK-LABEL: @fpclass_test
 llvm.func @fpclass_test(%arg0: f32) -> i1 {
   // CHECK: call i1 @llvm.is.fpclass
-  %0 = "llvm.intr.is.fpclass"(%arg0) <{bit = 0 : i32 }>: (f32) -> i1
+  %0 = "llvm.intr.is.fpclass"(%arg0) <{fastmathFlags = #llvm.fastmath<nnan>, kinds = 3 : i32 }>: (f32) -> i1
   llvm.return %0 : i1
 }
 
@@ -354,6 +354,10 @@ llvm.func @vector_reductions(%arg0: f32, %arg1: vector<8xf32>, %arg2: vector<8xi
   llvm.intr.vector.reduce.fmax(%arg1) : (vector<8xf32>) -> f32
   // CHECK: call float @llvm.vector.reduce.fmin.v8f32
   llvm.intr.vector.reduce.fmin(%arg1) : (vector<8xf32>) -> f32
+  // CHECK: call float @llvm.vector.reduce.fmaximum.v8f32
+  llvm.intr.vector.reduce.fmaximum(%arg1) : (vector<8xf32>) -> f32
+  // CHECK: call float @llvm.vector.reduce.fminimum.v8f32
+  llvm.intr.vector.reduce.fminimum(%arg1) : (vector<8xf32>) -> f32
   // CHECK: call i32 @llvm.vector.reduce.mul.v8i32
   "llvm.intr.vector.reduce.mul"(%arg2) : (vector<8xi32>) -> i32
   // CHECK: call i32 @llvm.vector.reduce.or.v8i32

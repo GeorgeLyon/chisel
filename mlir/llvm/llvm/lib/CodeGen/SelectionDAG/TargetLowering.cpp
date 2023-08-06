@@ -504,6 +504,11 @@ bool TargetLowering::ShrinkDemandedConstant(SDValue Op,
   SDLoc DL(Op);
   unsigned Opcode = Op.getOpcode();
 
+  // Early-out if we've ended up calling an undemanded node, leave this to
+  // constant folding.
+  if (DemandedBits.isZero() || DemandedElts.isZero())
+    return false;
+
   // Do target-specific constant optimization.
   if (targetShrinkDemandedConstant(Op, DemandedBits, DemandedElts, TLO))
     return TLO.New.getNode();
@@ -1903,6 +1908,10 @@ bool TargetLowering::SimplifyDemandedBits(
           return TLO.CombineTo(Op, NewOp);
         }
       }
+    } else {
+      // Use generic knownbits computation as it has support for non-uniform
+      // shift amounts.
+      Known = TLO.DAG.computeKnownBits(Op, DemandedElts, Depth);
     }
     break;
   }

@@ -51,7 +51,7 @@ class FEnumType;
 class RefType;
 class PropertyType;
 class StringType;
-class BigIntType;
+class FIntegerType;
 class ListType;
 class MapType;
 class PathType;
@@ -340,7 +340,7 @@ class PropertyType : public FIRRTLType {
 public:
   /// Support method to enable LLVM-style type casting.
   static bool classof(Type type) {
-    return llvm::isa<ClassType, StringType, BigIntType, ListType, MapType,
+    return llvm::isa<ClassType, StringType, FIntegerType, ListType, MapType,
                      PathType>(type);
   }
 
@@ -618,6 +618,24 @@ public:
 private:
   /// A flag detailing if we have already found a match.
   bool foundMatch = false;
+};
+
+template <typename BaseTy>
+class BaseTypeAliasOr
+    : public ::mlir::Type::TypeBase<BaseTypeAliasOr<BaseTy>,
+                                    firrtl::FIRRTLBaseType,
+                                    detail::FIRRTLBaseTypeStorage> {
+
+public:
+  using mlir::Type::TypeBase<BaseTypeAliasOr<BaseTy>, firrtl::FIRRTLBaseType,
+                             detail::FIRRTLBaseTypeStorage>::Base::Base;
+  // Support LLVM isa/cast/dyn_cast to BaseTy.
+  static bool classof(Type other) { return type_isa<BaseTy>(other); }
+
+  // Support C++ implicit conversions to BaseTy.
+  operator BaseTy() const { return circt::firrtl::type_cast<BaseTy>(*this); }
+
+  BaseTy get() const { return circt::firrtl::type_cast<BaseTy>(*this); }
 };
 
 } // namespace firrtl
