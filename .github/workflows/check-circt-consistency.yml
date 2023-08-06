@@ -20,8 +20,4 @@ jobs:
         uses: actions/checkout@v3
       - name: Check CIRCT consistency
         run: |
-          cd mlir/support
-          ./update-circt $(cat circt.sha)
-      - name: Check the diff is empty
-        run: |
-          git diff --exit-code
+          ./mlir/support/circt-helper check-circt-consistency

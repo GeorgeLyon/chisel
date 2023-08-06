@@ -10,8 +10,8 @@ NAME
   $(basename $0) - a lightweight tool for managing the CIRCT and LLVM sources included directly in this repository.
 
 SYNOPSYS
+  circt-helper update-circt <target-commit-ish> [--overwrite-local-changes]
   circt-helper check-metadata-consistency
-  circt-helper update-circt <target-commit-ish> [--ignore-local-changes]
 
 DESCRIPTION
   circt-helper is effectively a lightweight version of \`git submodule\`, specifically for the CIRCT project. \`git submodule\` is inconvenient for a number of reasons, and specifically including the LLVM project as a submodule is problematic because it is so large (~800MB in .git and a ~1.7GB checkout). Using circt-helper to manage the submodule instead brings this down to ~60MB in .git and ~200MB on disk. This significantly improves checkout time and performance of common git operations such as \`git status\`, greatly benefitting the developer experience and CI performance. It is worth mentioning that using \`git subtree\` would be worse, with all of the downsides mentioned except perhaps increasing the size of the checkout (though in a fragile way) and it would mix all of LLVMs history in with this repository.
@@ -26,7 +26,7 @@ SOURCE_SHA=$(cat "$METADATA_DIR/circt.sha")
 
 # Parse Arguments
 TARGET_COMMITISH=""
-IGNORE_LOCAL_CHANGES="OFF"
+OVERWRITE_LOCAL_CHANGES="OFF"
 CHECK_METADATA_CONSISTENCY="OFF"
 case "$1" in 
   "check-metadata-consistency") 
@@ -39,8 +39,8 @@ case "$1" in
     # Target commit-ish will be checked when creating snapshots
     shift
     case "$1" in 
-      "--ignore-local-changes") 
-        IGNORE_LOCAL_CHANGES="ON"
+      "--overwrite-local-changes") 
+        OVERWRITE_LOCAL_CHANGES="ON"
         shift
         ;;
     esac
@@ -142,7 +142,7 @@ MLIR_DIR="$REPO_DIR/mlir"
 echo "▸ Creating target snapshot…"
 create_remote_snapshot "$TARGET_SNAPSHOT_DIR" "$TARGET_COMMITISH"  
 
-case "$IGNORE_LOCAL_CHANGES" in 
+case "$OVERWRITE_LOCAL_CHANGES" in 
   "ON")
     echo "▸ Ignoring local changes…"
     # If we are ignoring local changes, the "input" and "source" snapshots are just copies of the "target" snapshot.
@@ -160,7 +160,7 @@ case "$IGNORE_LOCAL_CHANGES" in
     create_remote_snapshot "$SOURCE_SNAPSHOT_DIR" "$SOURCE_SHA"
     ;;
   *)
-    echo "Unexpected value for IGNORE_LOCAL_CHANGES: $IGNORE_LOCAL_CHANGES"
+    echo "Unexpected value for OVERWRITE_LOCAL_CHANGES: $OVERWRITE_LOCAL_CHANGES"
     exit 1
     ;;
 esac
