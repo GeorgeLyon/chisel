@@ -78,8 +78,6 @@ assert_repo_is_clean() {
     exit 1
   fi
 }
-echo "▸ Ensuring no unexpected changes in managed sources…"
-assert_repo_is_clean "$REPO_DIR" mlir/{circt,llvm}
 
 # Checkout or update (fetch) the CIRCT repo
 CHECKOUT_DIR="$SUPPORT_DIR/.checkout"
@@ -152,6 +150,8 @@ case "$IGNORE_LOCAL_CHANGES" in
     cp -pR "$TARGET_SNAPSHOT_DIR" "$SOURCE_SNAPSHOT_DIR"
     ;;
   "OFF")
+    echo "▸ Ensuring no unexpected changes in managed sources…"
+    assert_repo_is_clean "$REPO_DIR" mlir/{circt,llvm}
     echo "▸ Creating input snapshot…"
     mkdir "$INPUT_SNAPSHOT_DIR"
     cp -pR "$MLIR_DIR/circt" "$INPUT_SNAPSHOT_DIR/circt"
