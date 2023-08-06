@@ -1,6 +1,7 @@
 // Note: There are some additional constraints on workspace settings because of how we test the configuration is valid. See `.devcontainer/extract-cmake-arguments.sh` for details
 {
   // CMake Settings
+  "cmake.useProjectStatusView": true,
   "cmake.sourceDirectory": "${workspaceFolder}/mlir/llvm/llvm",
   "cmake.buildDirectory": "${workspaceFolder}/build/circel",
   "cmake.installPrefix": "/usr/local",

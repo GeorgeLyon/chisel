@@ -1,2 +1,3 @@
-support/.workdir
+support/.checkout
+support/.snapshots
 build
