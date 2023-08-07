@@ -12,7 +12,7 @@ on:
       - main
 
 jobs:
-  formatting-cpp:
+  check-circt-consistency:
     name: Check CIRCT consistency
     strategy:
       matrix:
@@ -24,3 +24,11 @@ jobs:
       - name: Check CIRCT consistency
         run: |
           ./mlir/support/circt-helper check-metadata-consistency
+  shellcheck-circt-helper:
+    name: Run ShellCheck on circt-helper
+    runs-on: ubuntu-22.04
+    steps
+    - name: Run ShellCheck
+      uses: ludeeus/action-shellcheck@master
+      env:
+        SHELLCHECK_OPTS: mlir/support/circt-helper
