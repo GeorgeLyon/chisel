@@ -139,7 +139,10 @@ OUTPUT_SNAPSHOT_DIR="$SNAPSHOTS_DIR/output"
 # MLIR_DIR is the directory containing the managed sources (in the "llvm" and "circt" subdirectories)
 MLIR_DIR="$REPO_DIR/mlir"
 
-# First, we create the target snapshot.
+# If a repository update is interrupted, there may be a leftover delta in the checkout directory which we need to clean up.
+git -C "$CHECKOUT_DIR" reset --hard
+
+# Create the target snapshot.
 echo "▸ Creating target snapshot…"
 create_remote_snapshot "$TARGET_SNAPSHOT_DIR" "$TARGET_COMMITISH"  
 
