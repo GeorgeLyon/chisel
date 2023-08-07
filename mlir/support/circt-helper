@@ -195,7 +195,7 @@ diff_helper() {
   local SUBSECONDS="\.[0-9]+"
   local TIMEZONE_OFFSET="\+[0-9]{4}"
   local TIMESTAMP="$YEAR_MONTH_DAY $HOUR_MINUTE_SECOND($SUBSECONDS( $TIMEZONE_OFFSET){0,1}){0,1}"
-  do_diff "$@" | sed -E "s@^((-{3} target|\+{3} output).*[^[:space:]])[[:space:]]*$TIMESTAMP\$@\1@"
+  do_diff $@ | sed -E "s@^((-{3} target|\+{3} output).*[^[:space:]])[[:space:]]*$TIMESTAMP\$@\1@"
 }
 
 # At this point, the "input", "source" and "target" snapshots have been created. All that remains is to create the "output" snapshot. To do this, we copy the "target" snapshot, and apply the diff from the "input" to the "source" snapshot.
