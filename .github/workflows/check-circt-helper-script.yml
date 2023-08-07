@@ -1,4 +1,4 @@
-name: Check CIRCT consistency
+name: Check `circt-helper` script
 
 on:
   workflow_dispatch:
@@ -12,8 +12,8 @@ on:
       - main
 
 jobs:
-  check-circt-consistency:
-    name: Check CIRCT consistency
+  check-metadata-consistency:
+    name: Check CIRCT metadata consistency
     strategy:
       matrix:
         os: [ubuntu-22.04, macos-13]
@@ -29,6 +29,6 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
     - name: Run ShellCheck
-      uses: ludeeus/action-shellcheck@master
-      env:
-        SHELLCHECK_OPTS: mlir/support/circt-helper
+      run: |
+        curl -L https://github.com/koalaman/shellcheck/releases/download/v0.9.0/shellcheck-v0.9.0.linux.x84_64.tar.xz | tar -x --xz --strip-components=1
+        ./shellcheck mlir/support/circt-helper
