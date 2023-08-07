@@ -30,5 +30,6 @@ jobs:
     steps:
     - name: Run ShellCheck
       run: |
-        curl -L https://github.com/koalaman/shellcheck/releases/download/v0.9.0/shellcheck-v0.9.0.linux.x86_64.tar.xz | tar -xz --strip-components=1
+        curl -Lso shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v0.9.0/shellcheck-v0.9.0.linux.x86_64.tar.xz
+        tar -xf --strip-components=1 shellcheck.tar.xz
         ./shellcheck mlir/support/circt-helper
