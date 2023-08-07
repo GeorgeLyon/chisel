@@ -27,7 +27,7 @@ jobs:
   shellcheck-circt-helper:
     name: Run ShellCheck on circt-helper
     runs-on: ubuntu-22.04
-    steps
+    steps:
     - name: Run ShellCheck
       uses: ludeeus/action-shellcheck@master
       env:
