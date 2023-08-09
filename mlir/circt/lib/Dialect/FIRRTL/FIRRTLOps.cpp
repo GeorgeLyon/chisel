@@ -895,6 +895,7 @@ static bool printModulePorts(OpAsmPrinter &p, Block *block,
 /// will populate `entryArgs`.
 static ParseResult
 parseModulePorts(OpAsmParser &parser, bool hasSSAIdentifiers,
+                 bool supportsSymbols,
                  SmallVectorImpl<OpAsmParser::Argument> &entryArgs,
                  SmallVectorImpl<Direction> &portDirections,
                  SmallVectorImpl<Attribute> &portNames,
@@ -955,16 +956,18 @@ parseModulePorts(OpAsmParser &parser, bool hasSSAIdentifiers,
       entryArgs.back().type = portType;
 
     // Parse the optional port symbol.
-    hw::InnerSymAttr innerSymAttr;
-    if (succeeded(parser.parseOptionalKeyword("sym"))) {
-      NamedAttrList dummyAttrs;
-      if (parser.parseCustomAttributeWithFallback(
-              innerSymAttr, ::mlir::Type{},
-              hw::InnerSymbolTable::getInnerSymbolAttrName(), dummyAttrs)) {
-        return ::mlir::failure();
+    if (supportsSymbols) {
+      hw::InnerSymAttr innerSymAttr;
+      if (succeeded(parser.parseOptionalKeyword("sym"))) {
+        NamedAttrList dummyAttrs;
+        if (parser.parseCustomAttributeWithFallback(
+                innerSymAttr, ::mlir::Type{},
+                hw::InnerSymbolTable::getInnerSymbolAttrName(), dummyAttrs)) {
+          return ::mlir::failure();
+        }
       }
+      portSyms.push_back(innerSymAttr);
     }
-    portSyms.push_back(innerSymAttr);
 
     // Parse the port annotations.
     ArrayAttr annos;
@@ -1141,9 +1144,9 @@ static ParseResult parseFModuleLikeOp(OpAsmParser &parser,
   SmallVector<Attribute, 4> portAnnotations;
   SmallVector<Attribute, 4> portSyms;
   SmallVector<Attribute, 4> portLocs;
-  if (parseModulePorts(parser, hasSSAIdentifiers, entryArgs, portDirections,
-                       portNames, portTypes, portAnnotations, portSyms,
-                       portLocs))
+  if (parseModulePorts(parser, hasSSAIdentifiers, /*supportsSymbols=*/true,
+                       entryArgs, portDirections, portNames, portTypes,
+                       portAnnotations, portSyms, portLocs))
     return failure();
 
   // If module attributes are present, parse them.
@@ -1269,7 +1272,7 @@ LogicalResult FExtModuleOp::verify() {
   auto checkParmValue = [&](Attribute elt) -> bool {
     auto param = cast<ParamDeclAttr>(elt);
     auto value = param.getValue();
-    if (isa<IntegerAttr, StringAttr, FloatAttr>(value))
+    if (isa<IntegerAttr, StringAttr, FloatAttr, hw::ParamVerbatimAttr>(value))
       return true;
     emitError() << "has unknown extmodule parameter value '"
                 << param.getName().getValue() << "' = " << value;
@@ -1463,9 +1466,10 @@ ParseResult ClassOp::parse(OpAsmParser &parser, OperationState &result) {
   SmallVector<Attribute, 4> portAnnotations;
   SmallVector<Attribute, 4> portSyms;
   SmallVector<Attribute, 4> portLocs;
-  if (parseModulePorts(parser, /*hasSSAIdentifiers=*/true, entryArgs,
-                       portDirections, portNames, portTypes, portAnnotations,
-                       portSyms, portLocs))
+  if (parseModulePorts(parser, /*hasSSAIdentifiers=*/true,
+                       /*supportsSymbols=*/false, entryArgs, portDirections,
+                       portNames, portTypes, portAnnotations, portSyms,
+                       portLocs))
     return failure();
 
   // Ports on ClassOp cannot have annotations
@@ -2000,9 +2004,10 @@ ParseResult InstanceOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parseNameKind(parser, nameKind) ||
       parser.parseOptionalAttrDict(result.attributes) ||
       parser.parseAttribute(moduleName, "moduleName", resultAttrs) ||
-      parseModulePorts(parser, /*hasSSAIdentifiers=*/false, entryArgs,
-                       portDirections, portNames, portTypes, portAnnotations,
-                       portSyms, portLocs))
+      parseModulePorts(parser, /*hasSSAIdentifiers=*/false,
+                       /*supportsSymbols=*/false, entryArgs, portDirections,
+                       portNames, portTypes, portAnnotations, portSyms,
+                       portLocs))
     return failure();
 
   // Add the attributes. We let attributes defined in the attr-dict override
@@ -5121,15 +5126,13 @@ FIRRTLType RWProbeOp::inferReturnType(ValueRange operands,
 
 LogicalResult RWProbeOp::verifyInnerRefs(hw::InnerRefNamespace &ns) {
   auto targetRef = getTarget();
-  if (!targetRef)
-    return emitOpError("has invalid target reference");
   if (targetRef.getModule() !=
       (*this)->getParentOfType<FModuleLike>().getModuleNameAttr())
     return emitOpError() << "has non-local target";
 
   auto target = ns.lookup(targetRef);
   if (!target)
-    return emitOpError() << "has target that cannot be resolved: " << target;
+    return emitOpError() << "has target that cannot be resolved: " << targetRef;
 
   auto checkFinalType = [&](auto type, Location loc) -> LogicalResult {
     // Determine final type.
