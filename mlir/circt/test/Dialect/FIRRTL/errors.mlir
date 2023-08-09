@@ -359,6 +359,19 @@ firrtl.circuit "Foo" {
 
 // -----
 
+// https://github.com/llvm/circt/issues/5788
+firrtl.circuit "InstanceCannotHavePortSymbols" {
+  firrtl.extmodule @Ext(in in : !firrtl.uint<1>)
+  firrtl.module @InstanceCannotHavePortSymbols() {
+    // Not great diagnostic, but this should never happen so don't bother checking for it.
+    // expected-error @below {{expected ')'}}
+    %foo_in = firrtl.instance foo @Ext(in in : !firrtl.uint<1> sym @sym)
+  }
+}
+
+
+// -----
+
 firrtl.circuit "X" {
 
 firrtl.module @X(in %a : !firrtl.uint<4>) {
@@ -1787,6 +1800,16 @@ firrtl.circuit "ClassCannotHaveWires" {
 
 // -----
 
+// #5788, but for class operations.
+firrtl.circuit "ClassCannotHavePortSymbols" {
+  firrtl.module @ClassCannotHavePortSymbols() {}
+  // Not great diagnostic, but this should never happen so don't bother checking for it.
+  // expected-error @below {{expected ')'}}
+  firrtl.class @ClassWithPortSymbol(in %in: !firrtl.string sym @foo, in %in2 : !firrtl.string) {}
+}
+
+// -----
+
 // A group definition, "@A::@B", is missing an outer nesting of a group
 // definition with symbol "@A".
 firrtl.circuit "GroupMissingNesting" {
@@ -1896,6 +1919,16 @@ firrtl.circuit "RWProbeRemote" {
     %rw = firrtl.ref.rwprobe <@Other::@x> : !firrtl.uint<1>
   }
 }
+
+// -----
+
+firrtl.circuit "RWProbeBadTarget" {
+  firrtl.module @RWProbeBadTarget() {
+    // expected-error @below {{has target that cannot be resolved: #hw.innerNameRef<@RWProbeBadTarget::@x>}}
+    %rw = firrtl.ref.rwprobe <@RWProbeBadTarget::@x> : !firrtl.uint<1>
+  }
+}
+
 
 // -----
 
