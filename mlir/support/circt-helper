@@ -226,7 +226,7 @@ rsync -avqt --delete{,-excluded} \
 find "$MLIR_DIR/"{llvm,circt} -type f -print0 | \
   xargs -0 git -C "$REPO_DIR" add -f
 # Make sure any deleted files are added as well
-git -C "$REPO_DIR" add "$MLIR_DIR/"{llvm,circt,metadata}
+git -C "$REPO_DIR" add "$MLIR_DIR/"{llvm,circt,support/metadata}
 
 # Capture the diff from output to target, since the line numbers from the source diff might have been offset in the target snapshot. Also, we split the diff into two for easier comprehension.
 diff_helper "$SNAPSHOTS_DIR" {target,output}/llvm > "$METADATA_DIR/llvm.diff"
