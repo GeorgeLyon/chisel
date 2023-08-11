@@ -57,11 +57,11 @@ protected:
     storage->referenceCount++;
   }
 
-  template <typename T> void assertStorageTypeMatches() {
+  template <typename T> void assertStorageTypeMatches() const {
     assert(mlir::TypeID::get<T>() == storage->typeID);
   }
 
-  template <typename T> T *getPointerToValue() {
+  template <typename T> T *getPointerToValue() const {
     // We may eventually remove this check, as it we already check the type is
     // consistent when creating a NativeReference, but it is a helpful sanity
     // check while things are evolving rapidly.
@@ -105,12 +105,25 @@ protected:
   explicit TypedNativeReference(Storage<T> *storage)
       : AnyNativeReference(storage) {}
 
+  template <typename... Args>
+  static TypedNativeReference<T> create(Args &&...args) {
+    return TypedNativeReference<T>(
+        new mlir::bindings::AnyNativeReference::Storage<T>(
+            std::forward<Args>(args)...));
+  }
+
+  static TypedNativeReference<T> getFromOpaqueReference(void *opaqueReference) {
+    auto reference = TypedNativeReference<T>(opaqueReference);
+    reference.template assertStorageTypeMatches<T>();
+    return reference;
+  }
+
 public:
   TypedNativeReference(const TypedNativeReference &source)
       : AnyNativeReference(source) {}
 
-  T *operator->() { return getPointerToValue<T>(); }
-  T operator*() { return *getPointerToValue<T>(); }
+  T *operator->() const { return getPointerToValue<T>(); }
+  T operator*() const { return *getPointerToValue<T>(); }
 };
 } // namespace detail
 
