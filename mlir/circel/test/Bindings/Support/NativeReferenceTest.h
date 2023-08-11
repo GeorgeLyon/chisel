@@ -11,9 +11,9 @@ struct TestHelper {
 
 template <>
 class mlir::bindings::NativeReference<TestHelper>
-    : public detail::TypedNativeReference<TestHelper> {
+    : public detail::NativeReferenceImpl<TestHelper> {
 public:
-  using detail::TypedNativeReference<TestHelper>::TypedNativeReference;
-  using detail::TypedNativeReference<TestHelper>::create;
-  using detail::TypedNativeReference<TestHelper>::getFromOpaqueReference;
+  using detail::NativeReferenceImpl<TestHelper>::NativeReferenceImpl;
+  using detail::NativeReferenceImpl<TestHelper>::create;
+  using detail::NativeReferenceImpl<TestHelper>::getFromOpaqueReference;
 };

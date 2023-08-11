@@ -79,7 +79,7 @@ public:
       storage->storedDestructor(storage);
   }
 
-  void *getRetainedOpaqueReference() {
+  void *getRetainedOpaqueReference() const {
     storage->referenceCount++;
     return reinterpret_cast<void *>(storage);
   }
@@ -94,32 +94,32 @@ public:
 };
 
 namespace detail {
-template <typename T> class TypedNativeReference : public AnyNativeReference {
+template <typename T> class NativeReferenceImpl : public AnyNativeReference {
 
 protected:
-  explicit TypedNativeReference(void *opaqueReference)
+  explicit NativeReferenceImpl(void *opaqueReference)
       : AnyNativeReference(opaqueReference) {
     assertStorageTypeMatches<T>();
   }
 
-  explicit TypedNativeReference(Storage<T> *storage)
+  explicit NativeReferenceImpl(Storage<T> *storage)
       : AnyNativeReference(storage) {}
 
   template <typename... Args>
-  static TypedNativeReference<T> create(Args &&...args) {
-    return TypedNativeReference<T>(
+  static NativeReferenceImpl<T> create(Args &&...args) {
+    return NativeReferenceImpl<T>(
         new mlir::bindings::AnyNativeReference::Storage<T>(
             std::forward<Args>(args)...));
   }
 
-  static TypedNativeReference<T> getFromOpaqueReference(void *opaqueReference) {
-    auto reference = TypedNativeReference<T>(opaqueReference);
+  static NativeReferenceImpl<T> getFromOpaqueReference(void *opaqueReference) {
+    auto reference = NativeReferenceImpl<T>(opaqueReference);
     reference.template assertStorageTypeMatches<T>();
     return reference;
   }
 
 public:
-  TypedNativeReference(const TypedNativeReference &source)
+  NativeReferenceImpl(const NativeReferenceImpl &source)
       : AnyNativeReference(source) {}
 
   T *operator->() const { return getPointerToValue<T>(); }
@@ -128,7 +128,7 @@ public:
 } // namespace detail
 
 template <typename T>
-class NativeReference : public detail::TypedNativeReference<T> {};
+class NativeReference : public detail::NativeReferenceImpl<T> {};
 
 } // namespace bindings
 } // namespace mlir
