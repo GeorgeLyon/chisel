@@ -38,6 +38,14 @@ protected:
                        delete storage;
                      }),
           value(std::forward<Args>(args)...) {}
+
+    Storage(T value)
+        : AnyStorage(mlir::TypeID::get<T>(),
+                     [](AnyStorage *anyStorage) {
+                       auto storage = static_cast<Storage<T> *>(anyStorage);
+                       delete storage;
+                     }),
+          value(value) {}
   };
 
   explicit AnyNativeReference(AnyStorage *storage) : storage(storage) {}
@@ -53,9 +61,12 @@ protected:
     assert(mlir::TypeID::get<T>() == storage->typeID);
   }
 
-  template <typename T> const T &getValue() {
+  template <typename T> T *getPointerToValue() {
+    // We may eventually remove this check, as it we already check the type is
+    // consistent when creating a NativeReference, but it is a helpful sanity
+    // check while things are evolving rapidly.
     assertStorageTypeMatches<T>();
-    return static_cast<Storage<T> *>(storage)->value;
+    return &static_cast<Storage<T> *>(storage)->value;
   }
 
 public:
@@ -81,27 +92,30 @@ public:
     assert(reference.storage->referenceCount-- > 0);
   }
 };
-template <typename T> class NativeReference : public AnyNativeReference {
-  NativeReference(Storage<T> *storage) : AnyNativeReference(storage) {}
 
-  NativeReference(void *opaqueReference)
-      : AnyNativeReference(opaqueReference) {}
+namespace detail {
+template <typename T> class TypedNativeReference : public AnyNativeReference {
+
+protected:
+  explicit TypedNativeReference(void *opaqueReference)
+      : AnyNativeReference(opaqueReference) {
+    assertStorageTypeMatches<T>();
+  }
+
+  explicit TypedNativeReference(Storage<T> *storage)
+      : AnyNativeReference(storage) {}
 
 public:
-  NativeReference(const NativeReference &source) : AnyNativeReference(source) {}
+  TypedNativeReference(const TypedNativeReference &source)
+      : AnyNativeReference(source) {}
 
-  template <typename... Args> static NativeReference<T> create(Args &&...args) {
-    return NativeReference<T>(new Storage<T>(std::forward<Args>(args)...));
-  }
-
-  static NativeReference<T> getFromOpaqueReference(void *opaqueReference) {
-    auto reference = NativeReference<T>(opaqueReference);
-    reference.template assertStorageTypeMatches<T>();
-    return reference;
-  }
-
-  const T &getValue() { return AnyNativeReference::getValue<T>(); }
+  T *operator->() { return getPointerToValue<T>(); }
+  T operator*() { return *getPointerToValue<T>(); }
 };
+} // namespace detail
+
+template <typename T>
+class NativeReference : public detail::TypedNativeReference<T> {};
 
 } // namespace bindings
 } // namespace mlir

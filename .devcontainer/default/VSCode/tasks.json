@@ -6,7 +6,8 @@
       "label": "Build Circel",
       "command": "build",
       "targets": [
-        "CircelJNI"
+        "CircelJNI",
+        "mlir-bindings-support-test"
       ],
       "group": {
         "kind": "build",
