@@ -1322,8 +1322,7 @@ static LogicalResult verifyPortSymbolUses(FModuleLike module,
     auto classOp = dyn_cast_or_null<ClassOp>(
         symbolTable.lookupSymbolIn(circuitOp, className));
     if (!classOp)
-      return module.emitOpError()
-             << "target class '" << className.getValue() << "' not found";
+      return module.emitOpError() << "references unknown class " << className;
 
     // verify that the result type agrees with the class definition.
     if (failed(classOp.verifyType(classType,
@@ -1395,8 +1394,10 @@ ConventionAttr FMemModuleOp::getConventionAttr() {
 
 void ClassOp::build(OpBuilder &builder, OperationState &result, StringAttr name,
                     ArrayRef<PortInfo> ports) {
-  for (const auto &port : ports)
-    assert(port.annotations.empty() && "class ports may not have annotations");
+  assert(
+      llvm::all_of(ports,
+                   [](const auto &port) { return port.annotations.empty(); }) &&
+      "class ports may not have annotations");
 
   buildModuleWithoutAnnos(builder, result, name, ports);
 
@@ -1626,13 +1627,17 @@ ClassType ClassOp::getInstanceType() {
   return ClassType::get(name, elements);
 }
 
+BlockArgument ClassOp::getArgument(size_t portNumber) {
+  return getBodyBlock()->getArgument(portNumber);
+}
+
 //===----------------------------------------------------------------------===//
 // Declarations
 //===----------------------------------------------------------------------===//
 
 /// Lookup the module or extmodule for the symbol.  This returns null on
 /// invalid IR.
-Operation *InstanceOp::getReferencedModule() {
+Operation *InstanceOp::getReferencedModuleSlow() {
   auto circuit = (*this)->getParentOfType<CircuitOp>();
   if (!circuit)
     return nullptr;
@@ -1641,12 +1646,11 @@ Operation *InstanceOp::getReferencedModule() {
 }
 
 hw::ModulePortInfo InstanceOp::getPortList() {
-  return cast<hw::PortList>(getReferencedModule()).getPortList();
+  return cast<hw::PortList>(getReferencedModuleSlow()).getPortList();
 }
 
-FModuleLike InstanceOp::getReferencedModule(SymbolTable &symbolTable) {
-  return symbolTable.lookup<FModuleLike>(
-      getModuleNameAttr().getLeafReference());
+Operation *InstanceOp::getReferencedModule(SymbolTable &symbolTable) {
+  return symbolTable.lookup(getModuleNameAttr().getLeafReference());
 }
 
 void InstanceOp::build(OpBuilder &builder, OperationState &result,
@@ -2635,8 +2639,7 @@ LogicalResult ObjectOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   auto classOp = dyn_cast_or_null<ClassOp>(
       symbolTable.lookupSymbolIn(circuitOp, className));
   if (!classOp)
-    return emitOpError() << "target class '" << className.getValue()
-                         << "' not found";
+    return emitOpError() << "references unknown class " << className;
 
   // verify that the result type agrees with the class definition.
   if (failed(classOp.verifyType(classType, [&]() { return emitOpError(); })))
@@ -3940,6 +3943,79 @@ FIRRTLType MultibitMuxOp::inferReturnType(ValueRange operands,
 }
 
 //===----------------------------------------------------------------------===//
+// ObjectSubfieldOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult ObjectSubfieldOp::inferReturnTypes(
+    MLIRContext *context, std::optional<mlir::Location> location,
+    ValueRange operands, DictionaryAttr attributes, OpaqueProperties properties,
+    RegionRange regions, llvm::SmallVectorImpl<Type> &inferredReturnTypes) {
+  auto type = inferReturnType(operands, attributes.getValue(), location);
+  if (!type)
+    return failure();
+  inferredReturnTypes.push_back(type);
+  return success();
+}
+
+Type ObjectSubfieldOp::inferReturnType(ValueRange operands,
+                                       ArrayRef<NamedAttribute> attrs,
+                                       std::optional<Location> loc) {
+  auto classType = dyn_cast<ClassType>(operands[0].getType());
+  if (!classType)
+    return emitInferRetTypeError(loc, "base object is not a class");
+
+  auto index = getAttr<IntegerAttr>(attrs, "index").getValue().getZExtValue();
+  if (classType.getNumElements() <= index)
+    return emitInferRetTypeError(loc, "element index is greater than the "
+                                      "number of fields in the object");
+
+  return classType.getElement(index).type;
+}
+
+void ObjectSubfieldOp::print(OpAsmPrinter &p) {
+  auto input = getInput();
+  auto classType = input.getType();
+  p << ' ' << input << "[";
+  p.printKeywordOrString(classType.getElement(getIndex()).name);
+  p << "]";
+  p.printOptionalAttrDict((*this)->getAttrs(), std::array{StringRef("index")});
+  p << " : " << classType;
+}
+
+ParseResult ObjectSubfieldOp::parse(OpAsmParser &parser,
+                                    OperationState &result) {
+  auto *context = parser.getContext();
+
+  OpAsmParser::UnresolvedOperand input;
+  std::string fieldName;
+  ClassType inputType;
+  if (parser.parseOperand(input) || parser.parseLSquare() ||
+      parser.parseKeywordOrString(&fieldName) || parser.parseRSquare() ||
+      parser.parseOptionalAttrDict(result.attributes) || parser.parseColon() ||
+      parser.parseType(inputType) ||
+      parser.resolveOperand(input, inputType, result.operands))
+    return failure();
+
+  auto index = inputType.getElementIndex(fieldName);
+  if (!index)
+    return parser.emitError(parser.getNameLoc(),
+                            "unknown field " + fieldName + " in class type ")
+           << inputType;
+  result.addAttribute("index",
+                      IntegerAttr::get(IntegerType::get(context, 32), *index));
+
+  SmallVector<Type> inferredReturnTypes;
+  if (failed(inferReturnTypes(context, result.location, result.operands,
+                              result.attributes.getDictionary(context),
+                              result.getRawProperties(), result.regions,
+                              inferredReturnTypes)))
+    return failure();
+  result.addTypes(inferredReturnTypes);
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // Binary Primitives
 //===----------------------------------------------------------------------===//
 
@@ -4558,6 +4634,26 @@ FIRRTLType TailPrimOp::inferReturnType(ValueRange operands,
 }
 
 //===----------------------------------------------------------------------===//
+// Properties
+//===----------------------------------------------------------------------===//
+
+LogicalResult PathOp::verifyInnerRefs(hw::InnerRefNamespace &ns) {
+  auto targetRef = getTarget();
+
+  // Check if the target is local.
+  if (targetRef.getModule() !=
+      (*this)->getParentOfType<FModuleLike>().getModuleNameAttr())
+    return emitOpError() << "has non-local target";
+
+  // Check that the target exists.
+  auto target = ns.lookup(targetRef);
+  if (!target)
+    return emitOpError() << "has target that cannot be resolved: " << targetRef;
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // VerbatimExprOp
 //===----------------------------------------------------------------------===//
 
@@ -5113,17 +5209,6 @@ FIRRTLType RefSubOp::inferReturnType(ValueRange operands,
       loc, "ref.sub op requires a RefType of vector or bundle base type");
 }
 
-FIRRTLType RWProbeOp::inferReturnType(ValueRange operands,
-                                      ArrayRef<NamedAttribute> attrs,
-                                      std::optional<Location> loc) {
-  auto typeAttr = getAttr<TypeAttr>(attrs, "type");
-  auto type = typeAttr.getValue();
-  auto forceableType = firrtl::detail::getForceableResultType(true, type);
-  if (!forceableType)
-    return emitInferRetTypeError(loc, "cannot force type ", type);
-  return forceableType;
-}
-
 LogicalResult RWProbeOp::verifyInnerRefs(hw::InnerRefNamespace &ns) {
   auto targetRef = getTarget();
   if (targetRef.getModule() !=
@@ -5142,9 +5227,10 @@ LogicalResult RWProbeOp::verifyInnerRefs(hw::InnerRefNamespace &ns) {
     else
       assert(target.getField() == 0);
     // Check.
-    if (fType != getType()) {
+    auto baseType = type_dyn_cast<FIRRTLBaseType>(fType);
+    if (!baseType || baseType.getPassiveType() != getType().getType()) {
       auto diag = emitOpError("has type mismatch: target resolves to ")
-                  << fType << " instead of expected " << getType();
+                  << fType << " instead of expected " << getType().getType();
       diag.attachNote(loc) << "target resolves here";
       return diag;
     }
@@ -5161,6 +5247,12 @@ LogicalResult RWProbeOp::verifyInnerRefs(hw::InnerRefNamespace &ns) {
     return emitOpError("has target that cannot be probed")
         .attachNote(symOp.getLoc())
         .append("target resolves here");
+  auto *ancestor =
+      symOp.getTargetResult().getParentBlock()->findAncestorOpInBlock(**this);
+  if (!ancestor || !symOp->isBeforeInBlock(ancestor))
+    return emitOpError("is not dominated by target")
+        .attachNote(symOp.getLoc())
+        .append("target here");
   return checkFinalType(symOp.getTargetResult().getType(), symOp.getLoc());
 }
 
