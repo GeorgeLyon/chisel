@@ -1060,6 +1060,33 @@ def BitCastOp: FIRRTLOp<"bitcast", [Pure]> {
 // Properties
 //===----------------------------------------------------------------------===//
 
+// The object.subfield op is different from other expressions, because its
+// result corresponds to a port, which can have foreign (not firrtl) types.
+// For this reason, the object.subfield op is incompatible with the
+// FIRRTLExprOp base class.
+def ObjectSubfieldOp : FIRRTLOp<"object.subfield",
+    [Pure, DeclareOpInterfaceMethods<InferTypeOpInterface>]> {
+  let summary = "Extract an element of an object";
+  let description = [{
+    The object.subfield expression refers to a subelement of an object.
+    ```mlir
+    %field = firrtl.object.subfield %object[field] : !firrt.class<@Class(field: !firrtl.string)>
+    ```
+  }];
+  let arguments = (ins ClassType:$input, I32Attr:$index);
+  let results = (outs PropertyType:$result);
+  let hasCustomAssemblyFormat = true;
+  let hasVerifier = false;
+  let extraClassDeclaration = [{
+    /// Infer the return type of this operation.
+    /// Note: In contrast to other ops, this function infers a generic Type,
+    /// in order to support foreign types in ports.
+    static Type inferReturnType(ValueRange operands,
+                                ArrayRef<NamedAttribute> attrs,
+                                std::optional<Location> loc);
+  }];
+}
+
 def StringConstantOp : FIRRTLOp<"string", [Pure, ConstantLike]> {
   let summary = "Produce a constant string value";
   let description = [{
@@ -1089,6 +1116,23 @@ def FIntegerConstantOp : FIRRTLOp<"integer", [Pure, ConstantLike]> {
   let arguments = (ins APSIntAttr:$value);
   let results = (outs FIntegerType:$result);
   let hasCustomAssemblyFormat = true;
+}
+
+def PathOp : FIRRTLOp<"path", [Pure,
+                  DeclareOpInterfaceMethods<InnerRefUserOpInterface>]> {
+  let summary = "Produce a path value";
+  let description = [{
+    Produces a value which represents a path to the target in a design.
+
+    Example:
+    ```mlir
+    %w = firrtl.wire sym @wire : !firrtl.uint<1>
+    %0 = firrtl.path <@foo::@wire>
+    ```
+  }];
+  let arguments = (ins InnerRefAttr:$target);
+  let results = (outs PathType:$result);
+  let assemblyFormat = "$target attr-dict";
 }
 
 //===----------------------------------------------------------------------===//
@@ -1189,20 +1233,23 @@ def RefSubOp : FIRRTLExprOp<"ref.sub"> {
      "$input `[` $index `]` attr-dict `:` qualified(type($input))";
 }
 
-def RWProbeOp : FIRRTLExprOp<"ref.rwprobe",
-                  [DeclareOpInterfaceMethods<InnerRefUserOpInterface>]> {
+def RWProbeOp : FIRRTLOp<"ref.rwprobe",
+                  [DeclareOpInterfaceMethods<InnerRefUserOpInterface>,
+                   HasCustomSSAName,
+                   Pure
+                  ]> {
   let summary = "FIRRTL RWProbe";
   let description = [{
     Create a RWProbe for the target.
     Target must be local.
     ```
-      %result = firrtl.ref.rwprobe @mod::@sym : t
+      %result = firrtl.ref.rwprobe @mod::@sym : firrtl.rwprobe<t>
     ```
   }];
 
-  let arguments = (ins InnerRefAttr:$target, TypeAttrOf<RWProbeTarget>:$type);
-  let results = (outs RefType:$result);
-  let assemblyFormat = "$target attr-dict `:` $type";
+  let arguments = (ins InnerRefAttr:$target);
+  let results = (outs RWProbeConcreteReset:$result);
+  let assemblyFormat = "$target attr-dict `:` type($result)";
 }
 
 //===----------------------------------------------------------------------===//

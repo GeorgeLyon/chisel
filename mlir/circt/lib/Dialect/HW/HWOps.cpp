@@ -1501,7 +1501,11 @@ Operation *InstanceOp::getReferencedModule(const HWSymbolCache *cache) {
                                                  getModuleNameAttr());
 }
 
-Operation *InstanceOp::getReferencedModule() {
+Operation *InstanceOp::getReferencedModule(SymbolTable &symtbl) {
+  return symtbl.lookup(getModuleNameAttr().getValue());
+}
+
+Operation *InstanceOp::getReferencedModuleSlow() {
   return getReferencedModule(/*cache=*/nullptr);
 }
 
@@ -3118,7 +3122,7 @@ LogicalResult HierPathOp::verifyInnerRefs(hw::InnerRefNamespace &ns) {
       return emitOpError() << "instance path is incorrect. Expected module: "
                            << expectedModuleName
                            << " instead found: " << innerRef.getModule();
-    HWInstanceLike instOp = ns.lookupOp<HWInstanceLike>(innerRef);
+    auto instOp = ns.lookupOp<igraph::InstanceOpInterface>(innerRef);
     if (!instOp)
       return emitOpError() << " module: " << innerRef.getModule()
                            << " does not contain any instance with symbol: "

@@ -280,12 +280,12 @@ LogicalResult TriggerOp::verify() { return verifyCallerTypes(*this); }
 // HWInstanceOp
 //===----------------------------------------------------------------------===//
 
-// HWInstanceLike interface
-StringRef HWInstanceOp::getInstanceName() { return getSymName(); }
+// InstanceOpInterface interface
+Operation *HWInstanceOp::getReferencedModuleSlow() { return getMachineOp(); }
 
-StringAttr HWInstanceOp::getInstanceNameAttr() { return getSymNameAttr(); }
-
-Operation *HWInstanceOp::getReferencedModule() { return getMachineOp(); }
+Operation *HWInstanceOp::getReferencedModule(SymbolTable &symtbl) {
+  return symtbl.lookup(getMachineAttr().getValue());
+}
 
 /// Lookup the machine for the symbol.  This returns null on invalid IR.
 MachineOp HWInstanceOp::getMachineOp() {
@@ -298,6 +298,16 @@ LogicalResult HWInstanceOp::verify() { return verifyCallerTypes(*this); }
 hw::ModulePortInfo HWInstanceOp::getPortList() {
   return getMachineOp().getPortList();
 }
+
+/// Module name is the same as the machine name.
+StringRef HWInstanceOp::getModuleName() { return getMachine(); }
+FlatSymbolRefAttr HWInstanceOp::getModuleNameAttr() { return getMachineAttr(); }
+
+mlir::StringAttr HWInstanceOp::getInstanceNameAttr() {
+  return getSymNameAttr();
+}
+
+llvm::StringRef HWInstanceOp::getInstanceName() { return getSymName(); }
 
 //===----------------------------------------------------------------------===//
 // StateOp
