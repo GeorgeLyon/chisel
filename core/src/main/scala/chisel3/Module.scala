@@ -11,9 +11,11 @@ import chisel3.internal.Builder._
 import chisel3.internal.firrtl._
 import chisel3.experimental.{BaseModule, SourceInfo, UnlocatableSourceInfo}
 import chisel3.internal.sourceinfo.{InstTransform}
+import chisel3.properties.Class
 import chisel3.reflect.DataMirror
 import _root_.firrtl.annotations.{IsModule, ModuleName, ModuleTarget}
 import _root_.firrtl.AnnotationSeq
+import chisel3.internal.plugin.autoNameRecursively
 
 object Module extends SourceInfoDoc {
 
@@ -40,6 +42,8 @@ object Module extends SourceInfoDoc {
     val parentWhenStack = Builder.whenStack
 
     // Save then clear clock and reset to prevent leaking scope, must be set again in the Module
+    // Note that Disable is a function of whatever the current reset is, so it does not need a port
+    //   and thus does not change when we cross module boundaries
     val (saveClock, saveReset) = (Builder.currentClock, Builder.currentReset)
     val savePrefix = Builder.getPrefix
     Builder.clearPrefix()
@@ -81,6 +85,12 @@ object Module extends SourceInfoDoc {
     // Handle connections at enclosing scope
     // We use _component because Modules that don't generate them may still have one
     if (Builder.currentModule.isDefined && module._component.isDefined) {
+      // Class only uses the Definition API, and is not allowed here.
+      module match {
+        case _: Class => throwException("Module() cannot be called on a Class. Please use Definition().")
+        case _ => ()
+      }
+
       val component = module._component.get
       pushCommand(DefInstance(sourceInfo, module, component.ports))
       module.initializeInParent()
@@ -91,8 +101,48 @@ object Module extends SourceInfoDoc {
   /** Returns the implicit Clock */
   def clock: Clock = Builder.forcedClock
 
+  /** Returns the implicit Clock, if it is defined */
+  def clockOption: Option[Clock] = Builder.currentClock
+
   /** Returns the implicit Reset */
   def reset: Reset = Builder.forcedReset
+
+  /** Returns the implicit Reset, if it is defined */
+  def resetOption: Option[Reset] = Builder.currentReset
+
+  /** Returns the implicit Disable
+    *
+    * Note that [[Disable]] is a function of the implicit clock and reset
+    * so having no implicit clock or reset may imply no `Disable`.
+    */
+  def disable(implicit sourceInfo: SourceInfo): Disable =
+    disableOption.getOrElse(throwException("Error: No implicit disable."))
+
+  /** Returns the current implicit [[Disable]], if one is defined
+    *
+    * Note that [[Disable]] is a function of the implicit clock and reset
+    * so having no implicit clock or reset may imply no `Disable`.
+    */
+  def disableOption(implicit sourceInfo: SourceInfo): Option[Disable] = {
+    Builder.currentDisable match {
+      case Disable.Never       => None
+      case Disable.BeforeReset => hasBeenReset.map(x => autoNameRecursively("disable")(!x))
+    }
+  }
+
+  // Should this be public or should users just go through .disable?
+  // Note that having a reset but not clock means hasBeenReset is None, should we default to just !reset?
+  private def hasBeenReset(implicit sourceInfo: SourceInfo): Option[Disable] = {
+    // TODO memoize this
+    (Builder.currentClock, Builder.currentReset) match {
+      case (Some(clock), Some(reset)) =>
+        val hasBeenReset = Module(new HasBeenResetIntrinsic)
+        hasBeenReset.clock := clock
+        hasBeenReset.reset := reset
+        Some(new Disable(hasBeenReset.out))
+      case _ => None
+    }
+  }
 
   /** Returns the current Module */
   def currentModule: Option[BaseModule] = Builder.currentModule
@@ -165,6 +215,7 @@ abstract class Module extends RawModule {
   // Implicit clock and reset pins
   final val clock: Clock = IO(Input(Clock()))(UnlocatableSourceInfo).suggestName("clock")
   final val reset: Reset = IO(Input(mkReset))(UnlocatableSourceInfo).suggestName("reset")
+  // TODO add a way to memoize hasBeenReset iff it is used
 
   // TODO It's hard to remove these deprecated override methods because they're used by
   //   Chisel.QueueCompatibility which extends chisel3.Queue which extends chisel3.Module
@@ -200,6 +251,7 @@ abstract class Module extends RawModule {
   // Setup ClockAndReset
   Builder.currentClock = Some(clock)
   Builder.currentReset = Some(reset)
+  // Note that we do no such setup for disable, it will default to hasBeenReset of the currentReset
   Builder.clearPrefix()
 
   private[chisel3] override def initializeInParent(): Unit = {
@@ -380,7 +432,7 @@ package experimental {
       _ids
     }
 
-    private val _ports = new ArrayBuffer[(BaseType, SourceInfo)]()
+    private val _ports = new ArrayBuffer[(Data, SourceInfo)]()
 
     // getPorts unfortunately already used for tester compatibility
     protected[chisel3] def getModulePorts: Seq[Data] = {
@@ -389,7 +441,7 @@ package experimental {
     }
 
     // gets Ports along with there source locators
-    private[chisel3] def getModulePortsAndLocators: Seq[(BaseType, SourceInfo)] = {
+    private[chisel3] def getModulePortsAndLocators: Seq[(Data, SourceInfo)] = {
       require(_closed, "Can't get ports before module close")
       _ports.toSeq
     }
@@ -403,7 +455,7 @@ package experimental {
     // This is dangerous because it can be called before the module is closed and thus there could
     // be more ports and names have not yet been finalized.
     // This should only to be used during the process of closing when it is safe to do so.
-    private[chisel3] def findPort(name: String): Option[BaseType] =
+    private[chisel3] def findPort(name: String): Option[Data] =
       _ports.collectFirst { case (data, _) if data.seedOpt.contains(name) => data }
 
     protected def portsSize: Int = _ports.size
@@ -553,7 +605,7 @@ package experimental {
       *
       * TODO: Use SeqMap/VectorMap when those data structures become available.
       */
-    private[chisel3] def getChiselPorts(implicit si: SourceInfo): Seq[(String, BaseType)] = {
+    private[chisel3] def getChiselPorts(implicit si: SourceInfo): Seq[(String, Data)] = {
       require(_closed, "Can't get ports before module close")
       modulePortsAskedFor = Some(si) // super-lock down the module
       (_component.get.ports ++ _component.get.secretPorts).map { port =>
@@ -564,10 +616,10 @@ package experimental {
     /** Chisel2 code didn't require the IO(...) wrapper and would assign a Chisel type directly to
       * io, then do operations on it. This binds a Chisel type in-place (mutably) as an IO.
       */
-    protected def _bindIoInPlace(iodef: BaseType)(implicit sourceInfo: SourceInfo): Unit = {
+    protected def _bindIoInPlace(iodef: Data)(implicit sourceInfo: SourceInfo): Unit = {
 
       // Assign any signals (Chisel or chisel3) with Unspecified/Flipped directions to Output/Input.
-      // This is only required for Data, not all BaseTypes in general.
+      // This is only required for Data, not all Datas in general.
       iodef match {
         case (data: Data) => Module.assignCompatDir(data)
         case _ => ()
@@ -579,7 +631,7 @@ package experimental {
 
     /** Private accessor for _bindIoInPlace */
     private[chisel3] def bindIoInPlace(
-      iodef: BaseType
+      iodef: Data
     )(
       implicit sourceInfo: SourceInfo
     ): Unit = _bindIoInPlace(iodef)
@@ -618,14 +670,14 @@ package experimental {
       *
       * The granted iodef must be a chisel type and not be bound to hardware.
       *
-      * Also registers an BaseType as a port, also performing bindings. Cannot be called once ports are
+      * Also registers an Data as a port, also performing bindings. Cannot be called once ports are
       * requested (so that all calls to ports will return the same information).
       * Internal API.
       *
-      * TODO(twigg): Specifically walk the BaseType definition to call out which nodes
+      * TODO(twigg): Specifically walk the Data definition to call out which nodes
       * are problematic.
       */
-    protected def IO[T <: BaseType](iodef: => T)(implicit sourceInfo: SourceInfo): T = {
+    protected def IO[T <: Data](iodef: => T)(implicit sourceInfo: SourceInfo): T = {
       chisel3.IO.apply(iodef)
     }
 

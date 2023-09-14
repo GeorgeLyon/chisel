@@ -15,7 +15,7 @@ object Serializer {
   val Indent = "  "
 
   // The version supported by the serializer.
-  val version = Version(3, 0, 0)
+  val version = Version(3, 2, 0)
 
   /** Converts a `FirrtlNode` into its string representation with
     * default indentation.
@@ -108,6 +108,50 @@ object Serializer {
     case ValidIf(cond, value, _) => b ++= "validif("; s(cond); b ++= ", "; s(value); b += ')'
     case SIntLiteral(value, width) =>
       b ++= "SInt"; s(width); b ++= "(0h"; b ++= value.toString(16); b ++= ")"
+    case IntegerPropertyLiteral(value) =>
+      b ++= "Integer("; b ++= value.toString(10); b ++= ")"
+    case DoublePropertyLiteral(value) =>
+      b ++= "Double("; b ++= value.toString(); b ++= ")"
+    case StringPropertyLiteral(value) =>
+      b ++= "String(\""; b ++= value; b ++= "\")"
+    case BooleanPropertyLiteral(value) =>
+      b ++= s"Bool(${value})"
+    case PathPropertyLiteral(value) =>
+      b ++= "path(\""; b ++= value; b ++= "\")"
+    case SequencePropertyValue(tpe, values) =>
+      b ++= "List<"; s(tpe); b ++= ">(";
+      val lastIdx = values.size - 1
+      values.zipWithIndex.foreach {
+        case (value, idx) =>
+          s(value)
+          if (idx != lastIdx) b ++= ", "
+      }
+      b += ')'
+    case MapPropertyValue(tpe, values) =>
+      s(tpe)
+      b += '('
+      val lastIdx = values.size - 1
+      values.zipWithIndex.foreach {
+        case ((key, value), idx) =>
+          s(key); b ++= " -> "; s(value)
+          if (idx != lastIdx) b ++= ", "
+      }
+      b += ')'
+    case TuplePropertyValue(values) =>
+      b ++= "Tuple<"
+      val lastIdx = values.size - 1
+      values.zipWithIndex.foreach {
+        case ((tpe, _), i) =>
+          s(tpe)
+          if (i != lastIdx) b ++= ", "
+      }
+      b ++= ">("
+      values.zipWithIndex.foreach {
+        case ((_, value), i) =>
+          s(value)
+          if (i != lastIdx) b ++= ", "
+      }
+      b += ')'
     case ProbeExpr(expr, _)   => b ++= "probe("; s(expr); b += ')'
     case RWProbeExpr(expr, _) => b ++= "rwprobe("; s(expr); b += ')'
     case ProbeRead(expr, _)   => b ++= "read("; s(expr); b += ')'
@@ -237,8 +281,9 @@ object Serializer {
   }
 
   private def s(node: Statement)(implicit b: StringBuilder, indent: Int): Unit = node match {
-    case DefNode(info, name, value) => b ++= "node "; b ++= legalize(name); b ++= " = "; s(value); s(info)
-    case Connect(info, loc, expr)   => b ++= "connect "; s(loc); b ++= ", "; s(expr); s(info)
+    case DefNode(info, name, value)  => b ++= "node "; b ++= legalize(name); b ++= " = "; s(value); s(info)
+    case Connect(info, loc, expr)    => b ++= "connect "; s(loc); b ++= ", "; s(expr); s(info)
+    case PropAssign(info, loc, expr) => b ++= "propassign "; s(loc); b ++= ", "; s(expr); s(info)
     case c: Conditionally => b ++= sIt(c).mkString
     case EmptyStmt => b ++= "skip"
     case bb: Block => b ++= sIt(bb).mkString
@@ -259,6 +304,8 @@ object Serializer {
       s(init); s(info)
     case DefInstance(info, name, module, _) =>
       b ++= "inst "; b ++= legalize(name); b ++= " of "; b ++= legalize(module); s(info)
+    case DefObject(info, name, cls) =>
+      b ++= "object "; b ++= legalize(name); b ++= " of "; b ++= legalize(cls); s(info)
     case DefMemory(
           info,
           name,
@@ -280,6 +327,9 @@ object Serializer {
       writers.foreach { w => b ++= "writer => "; b ++= legalize(w); newLineAndIndent(1) }
       readwriters.foreach { r => b ++= "readwriter => "; b ++= legalize(r); newLineAndIndent(1) }
       b ++= "read-under-write => "; b ++= readUnderWrite.toString
+    case DefTypeAlias(info, name, tpe) =>
+      b ++= "type "; b ++= name; b ++= " = ";
+      s(tpe) //; s(info) TODO: Uncomment once firtool accepts infos for type aliases
     case Attach(info, exprs) =>
       // exprs should never be empty since the attach statement takes *at least* two signals according to the spec
       b ++= "attach ("; s(exprs, ", "); b += ')'; s(info)
@@ -352,14 +402,33 @@ object Serializer {
     }
     case UIntType(width: Width) => b ++= "UInt"; s(width)
     case SIntType(width: Width) => b ++= "SInt"; s(width)
-    case BundleType(fields)    => b ++= "{ "; sField(fields, ", "); b += '}'
-    case VectorType(tpe, size) => s(tpe, lastEmittedConst); b += '['; b ++= size.toString; b += ']'
-    case ClockType             => b ++= "Clock"
-    case ResetType             => b ++= "Reset"
-    case AsyncResetType        => b ++= "AsyncReset"
-    case AnalogType(width)     => b ++= "Analog"; s(width)
-    case UnknownType           => b += '?'
-    case other                 => b ++= other.serialize // Handle user-defined nodes
+    case BundleType(fields)        => b ++= "{ "; sField(fields, ", "); b += '}'
+    case VectorType(tpe, size)     => s(tpe, lastEmittedConst); b += '['; b ++= size.toString; b += ']'
+    case ClockType                 => b ++= "Clock"
+    case ResetType                 => b ++= "Reset"
+    case AsyncResetType            => b ++= "AsyncReset"
+    case AnalogType(width)         => b ++= "Analog"; s(width)
+    case IntegerPropertyType       => b ++= "Integer"
+    case DoublePropertyType        => b ++= "Double"
+    case StringPropertyType        => b ++= "String"
+    case BooleanPropertyType       => b ++= "Bool"
+    case PathPropertyType          => b ++= "Path"
+    case SequencePropertyType(tpe) => b ++= "List<"; s(tpe, lastEmittedConst); b += '>'
+    case MapPropertyType(k, v)     => b ++= "Map<"; s(k, lastEmittedConst); b ++= ", "; s(v, lastEmittedConst); b += '>'
+    case TuplePropertyType(types) =>
+      val lastIdx = types.size - 1
+      b ++= "Tuple<"
+      types.zipWithIndex.foreach {
+        case (tpe, i) =>
+          s(tpe, lastEmittedConst)
+          if (i != lastIdx) b ++= ", "
+      }
+      b += '>'
+    case ClassPropertyType(name) => b ++= "Inst<"; b ++= name; b += '>'
+    case AnyRefPropertyType      => b ++= "AnyRef"
+    case AliasType(name)         => b ++= name
+    case UnknownType             => b += '?'
+    case other                   => b ++= other.serialize // Handle user-defined nodes
   }
 
   private def s(node: Direction)(implicit b: StringBuilder, indent: Int): Unit = node match {
@@ -408,6 +477,16 @@ object Serializer {
       newLineAndIndent(1); b ++= "intrinsic = "; b ++= intrinsic
       params.foreach { p => newLineAndIndent(1); s(p) }
       Iterator(b.toString)
+    case DefClass(info, name, ports, body) =>
+      val start = {
+        implicit val b = new StringBuilder
+        doIndent(0); b ++= "class "; b ++= name; b ++= " :"; s(info)
+        ports.foreach { p => newLineAndIndent(1); s(p) }
+        newLineNoIndent() // add a blank line between port declaration and body
+        newLineNoIndent() // newline for body, sIt will indent
+        b.toString
+      }
+      Iterator(start) ++ sIt(body)(indent + 1)
     case other =>
       Iterator(Indent * indent, other.serialize) // Handle user-defined nodes
   }
@@ -428,7 +507,14 @@ object Serializer {
       s(circuit.info)
       Iterator(b.toString)
     }
+    val typeAliases = if (circuit.typeAliases.nonEmpty) {
+      implicit val b = new StringBuilder
+      circuit.typeAliases.foreach(ta => { b ++= s"${NewLine}"; doIndent(1); s(ta) })
+      b ++= s"${NewLine}"
+      Iterator(b.toString)
+    } else Iterator.empty
     prelude ++
+      typeAliases ++
       circuit.modules.iterator.zipWithIndex.flatMap {
         case (m, i) =>
           val newline = Iterator(if (i == 0) s"$NewLine" else s"${NewLine}${NewLine}")

@@ -39,7 +39,7 @@ emitVersion := {
 lazy val minimalSettings = Seq(
   organization := "org.chipsalliance",
   scalacOptions := Seq("-deprecation", "-feature"),
-  scalaVersion := "2.13.11"
+  scalaVersion := "2.13.12"
 )
 
 lazy val commonSettings = minimalSettings ++ Seq(
@@ -238,7 +238,8 @@ lazy val pluginScalaVersions = Seq(
   "2.13.8",
   "2.13.9",
   "2.13.10",
-  "2.13.11"
+  "2.13.11",
+  "2.13.12"
 )
 
 lazy val plugin = (project in file("plugin"))
@@ -309,7 +310,16 @@ lazy val core = (project in file("core"))
       "-Xcheckinit",
       "-Xlint:infer-any"
 //      , "-Xlint:missing-interpolator"
-    )
+    ),
+    Compile / sourceGenerators += {
+      sourceManaged.map { dir =>
+        Boilerplate.templates.map { template =>
+          val file = dir / template.filename
+          IO.write(file, template.content)
+          file
+        }
+      }.taskValue,
+    }
   )
   .dependsOn(macros)
   .dependsOn(firrtl)

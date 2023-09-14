@@ -6,6 +6,7 @@ import firrtl.{ir => fir}
 import chisel3._
 import chisel3.internal._
 import chisel3.experimental._
+import chisel3.properties.{Property, PropertyType => PropertyTypeclass, Class, DynamicObject}
 import _root_.firrtl.{ir => firrtlir}
 import _root_.firrtl.{PrimOps, RenameMap}
 import _root_.firrtl.annotations.Annotation
@@ -102,7 +103,8 @@ object Arg {
     case Some(arg) if includeRoot    => arg.name
     case None if includeRoot =>
       id match {
-        case data: Data => data._computeName(Some("?")).get
+        case data: Data          => data._computeName(Some("?")).get
+        case obj:  DynamicObject => obj._computeName(Some("?")).get
         case _ => "?"
       }
     case _ => "_" // Used when includeRoot == false
@@ -165,6 +167,27 @@ case class SLit(n: BigInt, w: Width) extends LitArg(n, w) {
 
   def cloneWithWidth(newWidth: Width): this.type = {
     SLit(n, newWidth).asInstanceOf[this.type]
+  }
+}
+
+/** Literal property value.
+  *
+  * These are not LitArgs, because not all property literals are integers.
+  */
+private[chisel3] case class PropertyLit[T, U](
+  propertyType: PropertyTypeclass[_] { type Underlying = U; type Type = T },
+  lit:          U)
+    extends Arg {
+  def name:     String = s"PropertyLit($lit)"
+  def minWidth: Int = 0
+  def cloneWithWidth(newWidth: Width): this.type = PropertyLit(propertyType, lit).asInstanceOf[this.type]
+
+  /** Expose a bindLitArg API for PropertyLit, similar to LitArg.
+    */
+  def bindLitArg(elem: Property[T]): Property[T] = {
+    elem.bind(PropertyValueBinding)
+    elem.setRef(this)
+    elem
   }
 }
 
@@ -325,6 +348,7 @@ case class DefMemPort[T <: Data](
 @nowarn("msg=class Port") // delete when Port becomes private
 @deprecated(deprecatedPublicAPIMsg, "Chisel 3.6")
 case class DefInstance(sourceInfo: SourceInfo, id: BaseModule, ports: Seq[Port]) extends Definition
+private[chisel3] case class DefObject(sourceInfo: SourceInfo, id: DynamicObject) extends Definition
 @deprecated(deprecatedPublicAPIMsg, "Chisel 3.6")
 case class WhenBegin(sourceInfo: SourceInfo, pred: Arg) extends Command
 @deprecated(deprecatedPublicAPIMsg, "Chisel 3.6")
@@ -335,6 +359,7 @@ case class AltBegin(sourceInfo: SourceInfo) extends Command
 case class OtherwiseEnd(sourceInfo: SourceInfo, firrtlDepth: Int) extends Command
 @deprecated(deprecatedPublicAPIMsg, "Chisel 3.6")
 case class Connect(sourceInfo: SourceInfo, loc: Node, exp: Arg) extends Command
+private[chisel3] case class PropAssign(sourceInfo: SourceInfo, loc: Node, exp: Arg) extends Command
 @deprecated(deprecatedPublicAPIMsg, "Chisel 3.6")
 case class Attach(sourceInfo: SourceInfo, locs: Seq[Node]) extends Command
 @deprecated(deprecatedPublicAPIMsg, "Chisel 3.6")
@@ -346,7 +371,7 @@ case class Stop(id: stop.Stop, sourceInfo: SourceInfo, clock: Arg, ret: Int) ext
   "This API should never have been public, for Module port reflection, use DataMirror.modulePorts",
   "Chisel 3.5"
 )
-case class Port(id: BaseType, dir: SpecifiedDirection, sourceInfo: SourceInfo)
+case class Port(id: Data, dir: SpecifiedDirection, sourceInfo: SourceInfo)
 
 @deprecated(deprecatedPublicAPIMsg, "Chisel 3.6")
 case class Printf(id: printf.Printf, sourceInfo: SourceInfo, clock: Arg, pable: Printable) extends Definition
@@ -383,6 +408,9 @@ abstract class Component extends Arg {
   val secretPorts: mutable.ArrayBuffer[Port] = id.secretPorts
 }
 
+@deprecated(deprecatedPublicAPIMsg, "Chisel 3.6")
+private[chisel3] case class DefTypeAlias(sourceInfo: SourceInfo, underlying: fir.Type, val name: String)
+
 @nowarn("msg=class Port") // delete when Port becomes private
 @deprecated(deprecatedPublicAPIMsg, "Chisel 3.6")
 case class DefModule(id: RawModule, name: String, ports: Seq[Port], commands: Seq[Command]) extends Component {
@@ -408,6 +436,10 @@ private[chisel3] case class DefIntrinsicModule(
   params: Map[String, Param])
     extends Component
 
+@nowarn("msg=class Port") // delete when Port becomes private
+private[chisel3] case class DefClass(id: Class, name: String, ports: Seq[Port], commands: Seq[Command])
+    extends Component
+
 @deprecated(deprecatedPublicAPIMsg, "Chisel 3.6")
 case class Circuit(
   name:       String,
@@ -419,10 +451,17 @@ case class Circuit(
   @deprecated("Do not use newAnnotations val of Circuit directly - use firrtlAnnotations instead. Will be removed in a future release",
     "Chisel 3.5")
 
-  newAnnotations: Seq[ChiselMultiAnnotation]) {
+  newAnnotations: Seq[ChiselMultiAnnotation],
+  typeAliases:    Seq[DefTypeAlias]) {
 
-  def this(name: String, components: Seq[Component], annotations: Seq[ChiselAnnotation], renames: RenameMap) =
-    this(name, components, annotations, renames, Seq.empty)
+  def this(
+    name:        String,
+    components:  Seq[Component],
+    annotations: Seq[ChiselAnnotation],
+    renames:     RenameMap,
+    typeAliases: Seq[DefTypeAlias]
+  ) =
+    this(name, components, annotations, renames, Seq.empty, typeAliases)
 
   def firrtlAnnotations: Iterable[Annotation] =
     annotations.flatMap(_.toFirrtl.update(renames)) ++ newAnnotations.flatMap(
@@ -433,18 +472,27 @@ case class Circuit(
     name:        String = name,
     components:  Seq[Component] = components,
     annotations: Seq[ChiselAnnotation] = annotations,
-    renames:     RenameMap = renames
-  ) = Circuit(name, components, annotations, renames, newAnnotations)
+    renames:     RenameMap = renames,
+    typeAliases: Seq[DefTypeAlias] = typeAliases
+  ) = Circuit(name, components, annotations, renames, newAnnotations, typeAliases)
 
 }
 
 @deprecated(deprecatedPublicAPIMsg, "Chisel 3.6")
 object Circuit
-    extends scala.runtime.AbstractFunction4[String, Seq[Component], Seq[ChiselAnnotation], RenameMap, Circuit] {
-  def unapply(c: Circuit): Option[(String, Seq[Component], Seq[ChiselAnnotation], RenameMap)] = {
-    Some((c.name, c.components, c.annotations, c.renames))
+    extends scala.runtime.AbstractFunction5[String, Seq[Component], Seq[ChiselAnnotation], RenameMap, Seq[
+      DefTypeAlias
+    ], Circuit] {
+  def unapply(c: Circuit): Option[(String, Seq[Component], Seq[ChiselAnnotation], RenameMap, Seq[DefTypeAlias])] = {
+    Some((c.name, c.components, c.annotations, c.renames, c.typeAliases))
   }
 
-  def apply(name: String, components: Seq[Component], annotations: Seq[ChiselAnnotation], renames: RenameMap): Circuit =
-    new Circuit(name, components, annotations, renames)
+  def apply(
+    name:        String,
+    components:  Seq[Component],
+    annotations: Seq[ChiselAnnotation],
+    renames:     RenameMap,
+    typeAliases: Seq[DefTypeAlias] = Seq.empty
+  ): Circuit =
+    new Circuit(name, components, annotations, renames, typeAliases)
 }

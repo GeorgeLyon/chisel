@@ -151,6 +151,138 @@ The suggested pattern for `typeName`, and subsequently `desiredName`, is to fold
 
 `Bundles` that have multiple integer arguments aren't presently addressed by any of the built-in modules, and so implementing a descriptive and sufficiently differentiable `typeName` for such `Bundles` is left as an exercise to the reader. However, integers should not occur with an underscore before them at the very end of the `typeName` (e.g. `MyBundle_1`) because this is the _same_ syntax used for duplicates, and so would cause confusion. Having to disambiguate modules all named `Queue32_MyBundle_4_1`, `Queue32_MyBundle_4_2`, `Queue32_MyBundle_4_3`, and so on would be undesirable, indeed!
 
+### I don't want to override `typeName` over and over! Is there any easy way to generate a `typeName`?
+
+Yes, with the experimental `HasAutoTypename` trait. This trait can be mixed into your `Bundle`s to automatically generate a tuple-like `typeName` for them, based on the constructor parameters of that `Bundle`. Let's look at the previous examples:
+
+```scala mdoc:invisible:reset
+import chisel3._
+```
+
+```scala mdoc:silent
+class MyBundle[T <: Data](gen: T, intParam: Int) extends Bundle {
+  override def typeName = s"MyBundle_${gen.typeName}_${intParam}"
+  // ...
+}
+```
+
+```scala mdoc
+new MyBundle(UInt(8.W), 3).typeName
+```
+
+```scala mdoc:invisible:reset
+import chisel3._
+import circt.stage.ChiselStage
+def emitSystemVerilog(gen: => RawModule): String = {
+  val prettyArgs = Array("--disable-all-randomization", "--strip-debug-info")
+  ChiselStage.emitSystemVerilog(gen, firtoolOpts = prettyArgs)
+}
+```
+
+Auto-generated `typeName`s take the form of `{Bundle Name}_{Parameter Value 1}_{Parameter Value 2}_{...}`, and so our `MyBundle` can be equivalently expressed with:
+```scala mdoc:silent
+import chisel3.experimental.HasAutoTypename
+class MyBundle[T <: Data](gen: T, intParam: Int) extends Bundle with HasAutoTypename {
+  // ...
+  // Note: No `override def typeName` statement here
+}
+```
+
+```scala mdoc
+new MyBundle(UInt(8.W), 3).typeName
+```
+
+### Can I name my bundles in FIRRTL, so I don't generate extremely long bundle types?
+
+Yes, using the `HasTypeAlias` trait. FIRRTL has a construct to alias a bundle type with a type alias like so:
+
+```
+circuit Top :
+  type MyBundle = { foo : UInt<8>, bar : UInt<1>}
+  
+  module Top :
+    //...
+```
+
+These can be automatically emitted from Chisel by mixing `HasTypeAlias` into a user-defined `Record`, and implementing a field named `aliasName` with a `RecordAlias(...)` instance.
+
+```scala mdoc:silent
+import chisel3.experimental.{HasTypeAlias, RecordAlias}
+
+class AliasedBundle extends Bundle with HasTypeAlias {
+  override def aliasName = RecordAlias("MyAliasedBundle")
+  val foo = UInt(8.W)
+  val bar = Bool()
+}
+```
+
+Let's see what happens when we generate FIRRTL using this `Bundle`:
+
+```scala mdoc:invisible
+def emitFIRRTL(gen: => RawModule): String = {
+  ChiselStage.emitCHIRRTL(gen)
+}
+```
+```scala mdoc
+emitFIRRTL(new Module {
+  val wire = Wire(new AliasedBundle)
+})
+```
+
+`HasTypeAlias` also supports nested bundles, too:
+```scala mdoc:silent
+class Child extends Bundle with HasTypeAlias {
+  override def aliasName = RecordAlias("ChildBundle")
+  val x = UInt(8.W)
+}
+
+class Parent extends Bundle with HasTypeAlias {
+  override def aliasName = RecordAlias("ParentBundle")
+  val child = new Child
+}
+```
+```scala mdoc
+emitFIRRTL(new Module {
+  val wire = Wire(new Parent)
+})
+```
+
+### Why do I keep seeing _stripped suffixing everywhere in my FIRRTL? I didn't specify that in my `aliasName`.
+
+You're using an `Input(...)` or `Output(...)` in conjunction with an aliased `Record` that contains a `Flipped(...)`. These flipped values are stripped by `Input` and `Output` which fundamentally changes the type of the parent `Record`:
+
+```scala mdoc:silent
+class StrippedBundle extends Bundle with HasTypeAlias {
+  override def aliasName = RecordAlias("StrippedBundle")
+  val flipped = Flipped(UInt(8.W))
+  val normal = UInt(8.W)
+}
+```
+
+```scala mdoc
+emitFIRRTL(new Module {
+  val in = IO(Input(new StrippedBundle))
+})
+```
+
+Note how the bundle type doesn't contain a `flip flipped : UInt<8>` field, and the alias gains a `"_stripped"` suffix! This `Bundle` type is no longer the same as the one we wrote in Chisel, so we have to distinguish it as such.
+
+By default, the suffix appended to `Record` names is `"_stripped"`. This can be defined by users with an additional string argument passed to `RecordAlias(alias, strippedSuffix)`:
+
+```scala mdoc:silent
+class CustomStrippedBundle extends Bundle with HasTypeAlias {
+  override def aliasName = RecordAlias("StrippedBundle", "Foo")
+  val flipped = Flipped(UInt(8.W))
+  val normal = UInt(8.W)
+}
+```
+
+```scala mdoc
+emitFIRRTL(new Module {
+  val in = IO(Input(new CustomStrippedBundle))
+})
+```
+
 ### I want to add some hardware or assertions, but each time I do all the signal names get bumped!
 
 This is the classic "ECO" problem, and we provide descriptions in [explanation](../explanations/naming). In short,
