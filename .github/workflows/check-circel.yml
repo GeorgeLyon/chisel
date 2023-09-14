@@ -42,9 +42,8 @@ jobs:
       - name: Initialize devcontainer
         uses: devcontainers/ci@v0.3
         with:
-          imageName: ghcr.io/georgelyon/circel-${{ matrix.devcontainer-name }}-devcontainer
-          push: never
           # We configure ccache to not evict anything during compilation, and we perform a cleanup after compilation completes
+          push: never
           runCmd: |
             date +%s > .workflow-start-seconds
             export CCACHE_DIR=$PWD/ccache
@@ -54,17 +53,18 @@ jobs:
       - name: Configure CMake Project
         uses: devcontainers/ci@v0.3
         with:
+          push: never
           runCmd: |
             export CCACHE_DIR=$PWD/ccache
             git config --global --add safe.directory $PWD
             CMAKE_TOOLS_KITS_FILE=.devcontainer/cmake-tools-kits.json \
-              mlir/support/cmake-helper configure \
-                -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+              sil-core/support/cmake-helper configure
       # We run the build, once to check the targets and once to log the errors without any progress logs cluttering the output (since it is a trivial incremental build). Please take care to make sure the following two steps stay in sync.
       - name: Check targets
         id: check-targets
         uses: devcontainers/ci@v0.3
         with:
+          push: never
           runCmd: |
             export CCACHE_DIR=$PWD/ccache
             git config --global --add safe.directory $PWD
@@ -74,19 +74,16 @@ jobs:
         if: failure() && steps.check-targets.outcome == 'failure'
         uses: devcontainers/ci@v0.3
         with:
+          push: never
           runCmd: |
             export CCACHE_DIR=$PWD/ccache
             git config --global --add safe.directory $PWD
             mlir/support/cmake-helper build
             mlir/support/cmake-helper test
-      # - name: Check Scala Bindings
-      #   uses: devcontainers/ci@v0.3
-      #   with:
-      #     runCmd: |
-      #       sbt "project / test"
       - name: Clean up ccache
         uses: devcontainers/ci@v0.3
         with:
+          push: never
           runCmd: |
             export CCACHE_DIR=$PWD/ccache
             ccache -sv
@@ -96,6 +93,7 @@ jobs:
       # Save the cache prior to pruning it
       - name: Save ccache database
         uses: actions/cache/save@v3
+        if: steps.check-targets.outcome == 'success'
         with: 
           path: ccache
           key: circel-ccache-database-${{ steps.get-submodule-hashes.outputs.llvm-hash }}-${{ steps.get-submodule-hashes.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('mlir/circel/**') }}
@@ -103,7 +101,17 @@ jobs:
       - name: Log ccache estimated usage
         uses: devcontainers/ci@v0.3
         with:
+          push: never
           runCmd: |
             export CCACHE_DIR=$PWD/ccache
             ccache --evict-older-than $(($(date +%s) - $(cat .workflow-start-seconds)))s
             ccache -sv
+      - name: Check that repository is clean
+        uses: devcontainers/ci@v0.3
+        with:
+          push: never
+          runCmd: |
+            git config --global --add safe.directory $PWD
+            rm -rf .devcontainer
+            cp -r .actual-devcontainer .devcontainer
+            git diff --exit-code
