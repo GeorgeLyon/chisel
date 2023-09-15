@@ -10,6 +10,7 @@
 #include "circt/Conversion/Passes.h"
 #include "circt/Dialect/FIRRTL/FIRRTLOps.h"
 #include "circt/Dialect/FIRRTL/Passes.h"
+#include "circt/Dialect/HW/HWPasses.h"
 #include "circt/Dialect/SV/SVPasses.h"
 #include "circt/Dialect/Seq/SeqPasses.h"
 #include "circt/Support/Passes.h"
@@ -187,6 +188,8 @@ LogicalResult firtool::populateLowFIRRTLToHW(mlir::PassManager &pm,
   // RefType ports and ops.
   pm.nest<firrtl::CircuitOp>().addPass(firrtl::createLowerXMRPass());
 
+  pm.nest<firrtl::CircuitOp>().addPass(firrtl::createLowerClassesPass());
+
   pm.addPass(createLowerFIRRTLToHWPass(
       opt.enableAnnotationWarning.getValue(),
       opt.emitChiselAssertsAsSVA.getValue(),
@@ -199,6 +202,9 @@ LogicalResult firtool::populateLowFIRRTLToHW(mlir::PassManager &pm,
     modulePM.addPass(createSimpleCanonicalizerPass());
   }
 
+  // Check inner symbols and inner refs.
+  pm.addPass(hw::createVerifyInnerRefNamespacePass());
+
   return success();
 }
 
@@ -210,14 +216,12 @@ LogicalResult firtool::populateHWToSV(mlir::PassManager &pm,
                                                opt.etcDisableModuleInlining));
 
   pm.addPass(seq::createExternalizeClockGatePass(opt.clockGateOpts));
-  auto &modulePM = pm.nest<hw::HWModuleOp>();
-  modulePM.addPass(seq::createSeqFIRRTLLowerToSVPass(
+  pm.addPass(circt::createLowerSeqToSVPass(
       {/*disableRandomization=*/!opt.isRandomEnabled(
            FirtoolOptions::RandomKind::Reg),
        /*emitSeparateAlwaysBlocks=*/
        opt.emitSeparateAlwaysBlocks}));
-  modulePM.addPass(createLowerVerifToSVPass());
-  pm.addPass(seq::createLowerFirMemPass());
+  pm.addNestedPass<hw::HWModuleOp>(createLowerVerifToSVPass());
   pm.addPass(sv::createHWMemSimImplPass(
       opt.replSeqMem, opt.ignoreReadEnableMem, opt.addMuxPragmas,
       !opt.isRandomEnabled(FirtoolOptions::RandomKind::Mem),
@@ -233,5 +237,9 @@ LogicalResult firtool::populateHWToSV(mlir::PassManager &pm,
     modulePM.addPass(sv::createHWCleanupPass(
         /*mergeAlwaysBlocks=*/!opt.emitSeparateAlwaysBlocks));
   }
+
+  // Check inner symbols and inner refs.
+  pm.addPass(hw::createVerifyInnerRefNamespacePass());
+
   return success();
 }

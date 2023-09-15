@@ -1,8 +1,10 @@
 set(CIRCT_HW_Sources
+  ConversionPatterns.cpp
   CustomDirectiveImpl.cpp
   HWAttributes.cpp
   HWDialect.cpp
   HWInstanceGraph.cpp
+  HWModuleOpInterface.cpp
   HWOpInterfaces.cpp
   HWOps.cpp
   HWTypeInterfaces.cpp

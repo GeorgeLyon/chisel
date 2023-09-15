@@ -57,14 +57,16 @@ public:
             // Miscellaneous.
             BitsPrimOp, HeadPrimOp, MuxPrimOp, PadPrimOp, ShlPrimOp, ShrPrimOp,
             TailPrimOp, VerbatimExprOp, HWStructCastOp, BitCastOp, RefSendOp,
-            RefResolveOp, RefSubOp, RWProbeOp,
+            RefResolveOp, RefSubOp, RWProbeOp, XMRRefOp, XMRDerefOp,
             // Casts to deal with weird stuff
             UninferredResetCastOp, ConstCastOp, RefCastOp,
             mlir::UnrealizedConversionCastOp,
             // Property expressions.
-            StringConstantOp, FIntegerConstantOp>([&](auto expr) -> ResultType {
-          return thisCast->visitExpr(expr, args...);
-        })
+            StringConstantOp, FIntegerConstantOp, BoolConstantOp, ListCreateOp,
+            MapCreateOp, UnresolvedPathOp, PathOp>(
+            [&](auto expr) -> ResultType {
+              return thisCast->visitExpr(expr, args...);
+            })
         .Default([&](auto expr) -> ResultType {
           return thisCast->visitInvalidExpr(op, args...);
         });
@@ -191,6 +193,8 @@ public:
   HANDLE(RefResolveOp, Unhandled);
   HANDLE(RefSubOp, Unhandled);
   HANDLE(RWProbeOp, Unhandled);
+  HANDLE(XMRRefOp, Unhandled);
+  HANDLE(XMRDerefOp, Unhandled);
 
   // Conversions.
   HANDLE(HWStructCastOp, Unhandled);
@@ -203,6 +207,11 @@ public:
   // Property expressions.
   HANDLE(StringConstantOp, Unhandled);
   HANDLE(FIntegerConstantOp, Unhandled);
+  HANDLE(BoolConstantOp, Unhandled);
+  HANDLE(ListCreateOp, Unhandled);
+  HANDLE(MapCreateOp, Unhandled);
+  HANDLE(PathOp, Unhandled);
+  HANDLE(UnresolvedPathOp, Unhandled);
 #undef HANDLE
 };
 

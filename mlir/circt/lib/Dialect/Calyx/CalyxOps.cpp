@@ -20,9 +20,9 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/DialectImplementation.h"
-#include "mlir/IR/FunctionImplementation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/Interfaces/FunctionImplementation.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/PriorityQueue.h"
@@ -1822,15 +1822,14 @@ SmallVector<DictionaryAttr> PrimitiveOp::portAttributes() {
   SmallVector<DictionaryAttr> portAttributes;
   OpBuilder builder(getContext());
   hw::HWModuleExternOp prim = getReferencedPrimitive();
-  for (size_t i = 0, e = prim.getNumArguments(); i != e; ++i) {
-    DictionaryAttr dict = cleanCalyxPortAttrs(builder, prim.getArgAttrDict(i));
-    portAttributes.push_back(dict);
-  }
-  for (size_t i = 0, e = prim.getNumResults(); i != e; ++i) {
-    DictionaryAttr dict =
-        cleanCalyxPortAttrs(builder, prim.getResultAttrDict(i));
-    portAttributes.push_back(dict);
-  }
+  auto argAttrs = prim.getAllInputAttrs();
+  auto resAttrs = prim.getAllOutputAttrs();
+  for (auto a : argAttrs)
+    portAttributes.push_back(
+        cleanCalyxPortAttrs(builder, cast_or_null<DictionaryAttr>(a)));
+  for (auto a : resAttrs)
+    portAttributes.push_back(
+        cleanCalyxPortAttrs(builder, cast_or_null<DictionaryAttr>(a)));
   return portAttributes;
 }
 
@@ -2675,7 +2674,7 @@ Value InvokeOp::getInstGoValue() {
       })
       .Case<PrimitiveOp>([&](auto op) {
         auto moduleExternOp = op.getReferencedPrimitive();
-        auto argAttrs = moduleExternOp.getArgAttrsAttr();
+        auto argAttrs = moduleExternOp.getAllInputAttrs();
         for (auto [attr, res] : llvm::zip(argAttrs, op.getResults())) {
           if (DictionaryAttr dictAttr = dyn_cast<DictionaryAttr>(attr)) {
             if (!dictAttr.empty()) {
@@ -2711,7 +2710,7 @@ Value InvokeOp::getInstDoneValue() {
       .Case<PrimitiveOp>([&](auto op) {
         PrimitiveOp primOp = cast<PrimitiveOp>(operation);
         auto moduleExternOp = primOp.getReferencedPrimitive();
-        auto resAttrs = moduleExternOp.getResAttrsAttr();
+        auto resAttrs = moduleExternOp.getAllOutputAttrs();
         for (auto [attr, res] : llvm::zip(resAttrs, primOp.getResults())) {
           if (DictionaryAttr dictAttr = dyn_cast<DictionaryAttr>(attr)) {
             if (!dictAttr.empty()) {
@@ -2731,7 +2730,7 @@ getHwModuleExtGoOrDonePortNumber(hw::HWModuleExternOp &moduleExternOp,
                                  bool isGo) {
   size_t ret = 0;
   std::string str = isGo ? "calyx.go" : "calyx.done";
-  for (Attribute attr : moduleExternOp.getArgAttrsAttr()) {
+  for (Attribute attr : moduleExternOp.getAllInputAttrs()) {
     if (DictionaryAttr dictAttr = dyn_cast<DictionaryAttr>(attr)) {
       ret = llvm::count_if(dictAttr, [&](NamedAttribute iter) {
         return iter.getName().getValue() == str;
@@ -2849,6 +2848,21 @@ LogicalResult SliceLibOp::verify() {
            << inBits << ')' << " to be greater than output bits (" << outBits
            << ')';
   return success();
+}
+
+SmallVector<StringRef> MuxLibOp::portNames() {
+  return {"sel", "tru", "fal", "out"};
+}
+SmallVector<Direction> MuxLibOp::portDirections() {
+  return {Input, Input, Input, Output};
+}
+void MuxLibOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
+  getCellAsmResultNames(setNameFn, *this, this->portNames());
+}
+bool MuxLibOp::isCombinational() { return true; }
+SmallVector<DictionaryAttr> MuxLibOp::portAttributes() {
+  return {DictionaryAttr::get(getContext()), DictionaryAttr::get(getContext()),
+          DictionaryAttr::get(getContext()), DictionaryAttr::get(getContext())};
 }
 
 #define ImplBinPipeOpCellInterface(OpType, outName)                            \

@@ -15,6 +15,7 @@ target_link_libraries(circt-opt
   CIRCTArcTransforms
   CIRCTCalyx
   CIRCTCalyxToHW
+  CIRCTCalyxNative
   CIRCTCalyxToFSM
   CIRCTCalyxTransforms
   CIRCTComb
@@ -62,10 +63,11 @@ target_link_libraries(circt-opt
   CIRCTSCFToCalyx
   CIRCTScheduling
   CIRCTSeq
+  CIRCTSeqToSV
   CIRCTSeqTransforms
   CIRCTSSP
   CIRCTSSPTransforms
-  CIRCTStandardToHandshake
+  CIRCTCFToHandshake
   CIRCTOM
   CIRCTOMTransforms
   CIRCTPipelineOps
@@ -91,4 +93,5 @@ target_link_libraries(circt-opt
   MLIRSCFDialect
   MLIREmitCDialect
   MLIRFuncInlinerExtension
+  MLIRVectorDialect
 )

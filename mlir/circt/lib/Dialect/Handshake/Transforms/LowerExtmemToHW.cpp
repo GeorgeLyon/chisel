@@ -161,8 +161,10 @@ LogicalResult HandshakeLowerExtmemToHWPass::wrapESI(
   auto wrapperMod = b.create<hw::HWModuleOp>(
       loc, StringAttr::get(ctx, func.getName() + "_esi_wrapper"),
       wrapperModPortInfo);
-  Value clk = wrapperMod.getArgument(wrapperMod.getNumArguments() - 2);
-  Value rst = wrapperMod.getArgument(wrapperMod.getNumArguments() - 1);
+  Value clk = wrapperMod.getBodyBlock()->getArgument(
+      wrapperMod.getBodyBlock()->getNumArguments() - 2);
+  Value rst = wrapperMod.getBodyBlock()->getArgument(
+      wrapperMod.getBodyBlock()->getNumArguments() - 1);
   SmallVector<Value> clkRes = {clk, rst};
 
   b.setInsertionPointToStart(wrapperMod.getBodyBlock());
@@ -171,7 +173,7 @@ LogicalResult HandshakeLowerExtmemToHWPass::wrapESI(
   // Create backedges for the results of the external module. These will be
   // replaced by the service instance requests if associated with a memory.
   llvm::SmallVector<Backedge> backedges;
-  for (auto resType : extMod.getResultTypes())
+  for (auto resType : extMod.getOutputTypes())
     backedges.push_back(bb.get(resType));
 
   // Maintain which index we're currently at in the lowered handshake module's
@@ -248,14 +250,17 @@ LogicalResult HandshakeLowerExtmemToHWPass::wrapESI(
       // Add the argument from the wrapper mod. This is maintained by its own
       // counter (memref arguments are removed, so if there was an argument at
       // this point, it needs to come from the wrapper module).
-      instanceArgs.push_back(wrapperMod.getArgument(wrapperArgIdx++));
+      instanceArgs.push_back(
+          wrapperMod.getBodyBlock()->getArgument(wrapperArgIdx++));
     }
   }
 
   // Add any missing arguments from the wrapper module (this will be clock and
   // reset)
-  for (; wrapperArgIdx < wrapperMod.getNumArguments(); ++wrapperArgIdx)
-    instanceArgs.push_back(wrapperMod.getArgument(wrapperArgIdx));
+  for (; wrapperArgIdx < wrapperMod.getBodyBlock()->getNumArguments();
+       ++wrapperArgIdx)
+    instanceArgs.push_back(
+        wrapperMod.getBodyBlock()->getArgument(wrapperArgIdx));
 
   // Instantiate the inner module.
   auto instance =
@@ -270,8 +275,9 @@ LogicalResult HandshakeLowerExtmemToHWPass::wrapESI(
   auto outputOp =
       cast<hw::OutputOp>(wrapperMod.getBodyBlock()->getTerminator());
   b.setInsertionPoint(outputOp);
-  b.create<hw::OutputOp>(outputOp.getLoc(), instance.getResults().take_front(
-                                                wrapperMod.getNumResults()));
+  b.create<hw::OutputOp>(
+      outputOp.getLoc(),
+      instance.getResults().take_front(wrapperMod.getNumOutputPorts()));
   outputOp.erase();
 
   return success();

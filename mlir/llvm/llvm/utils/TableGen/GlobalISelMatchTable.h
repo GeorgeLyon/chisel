@@ -59,7 +59,8 @@ using GISelFlags = std::uint16_t;
 
 //===- Helper functions ---------------------------------------------------===//
 
-std::string getNameForFeatureBitset(const std::vector<Record *> &FeatureBitset);
+std::string getNameForFeatureBitset(const std::vector<Record *> &FeatureBitset,
+                                    int HwModeIdx);
 
 /// Takes a sequence of \p Rules and group them based on the predicates
 /// they share. \p MatcherStorage is used as a memory container
@@ -458,12 +459,17 @@ protected:
   /// ID for the next temporary register ID allocated with allocateTempRegID()
   unsigned NextTempRegID;
 
+  // HwMode predicate index for this rule. -1 if no HwMode.
+  int HwModeIdx = -1;
+
   /// Current GISelFlags
   GISelFlags Flags = 0;
 
   std::vector<std::string> RequiredSimplePredicates;
   std::vector<Record *> RequiredFeatures;
   std::vector<std::unique_ptr<PredicateMatcher>> EpilogueMatchers;
+
+  DenseSet<unsigned> ErasedInsnIDs;
 
   ArrayRef<SMLoc> SrcLoc;
 
@@ -498,8 +504,16 @@ public:
   void addRequiredFeature(Record *Feature);
   const std::vector<Record *> &getRequiredFeatures() const;
 
+  void addHwModeIdx(unsigned Idx) { HwModeIdx = Idx; }
+  int getHwModeIdx() const { return HwModeIdx; }
+
   void addRequiredSimplePredicate(StringRef PredName);
   const std::vector<std::string> &getRequiredSimplePredicates();
+
+  /// Attempts to mark \p ID as erased (GIR_EraseFromParent called on it).
+  /// If \p ID has already been erased, returns false and GIR_EraseFromParent
+  /// should NOT be emitted.
+  bool tryEraseInsnID(unsigned ID) { return ErasedInsnIDs.insert(ID).second; }
 
   // Emplaces an action of the specified Kind at the end of the action list.
   //
@@ -525,6 +539,8 @@ public:
     return Actions.emplace(InsertPt,
                            std::make_unique<Kind>(std::forward<Args>(args)...));
   }
+
+  void setPermanentGISelFlags(GISelFlags V) { Flags = V; }
 
   // Update the active GISelFlags based on the GISelFlags Record R.
   // A SaveAndRestore object is returned so the old GISelFlags are restored
@@ -647,6 +663,10 @@ public:
     return Predicates.size();
   }
   bool predicates_empty() const { return Predicates.empty(); }
+
+  template <typename Ty> bool contains() const {
+    return any_of(Predicates, [&](auto &P) { return isa<Ty>(P.get()); });
+  }
 
   std::unique_ptr<PredicateTy> predicates_pop_front() {
     std::unique_ptr<PredicateTy> Front = std::move(Predicates.front());
@@ -1930,23 +1950,41 @@ public:
 };
 
 /// Adds a specific immediate to the instruction being built.
+/// If a LLT is passed, a ConstantInt immediate is created instead.
 class ImmRenderer : public OperandRenderer {
 protected:
   unsigned InsnID;
   int64_t Imm;
+  std::optional<LLTCodeGen> CImmLLT;
 
 public:
   ImmRenderer(unsigned InsnID, int64_t Imm)
       : OperandRenderer(OR_Imm), InsnID(InsnID), Imm(Imm) {}
+
+  ImmRenderer(unsigned InsnID, int64_t Imm, const LLTCodeGen &CImmLLT)
+      : OperandRenderer(OR_Imm), InsnID(InsnID), Imm(Imm), CImmLLT(CImmLLT) {
+    KnownTypes.insert(CImmLLT);
+  }
 
   static bool classof(const OperandRenderer *R) {
     return R->getKind() == OR_Imm;
   }
 
   void emitRenderOpcodes(MatchTable &Table, RuleMatcher &Rule) const override {
-    Table << MatchTable::Opcode("GIR_AddImm") << MatchTable::Comment("InsnID")
-          << MatchTable::IntValue(InsnID) << MatchTable::Comment("Imm")
-          << MatchTable::IntValue(Imm) << MatchTable::LineBreak;
+    if (CImmLLT) {
+      assert(Table.isCombiner() &&
+             "ConstantInt immediate are only for combiners!");
+      Table << MatchTable::Opcode("GIR_AddCImm")
+            << MatchTable::Comment("InsnID") << MatchTable::IntValue(InsnID)
+            << MatchTable::Comment("Type")
+            << MatchTable::NamedValue(CImmLLT->getCxxEnumValue())
+            << MatchTable::Comment("Imm") << MatchTable::IntValue(Imm)
+            << MatchTable::LineBreak;
+    } else {
+      Table << MatchTable::Opcode("GIR_AddImm") << MatchTable::Comment("InsnID")
+            << MatchTable::IntValue(InsnID) << MatchTable::Comment("Imm")
+            << MatchTable::IntValue(Imm) << MatchTable::LineBreak;
+    }
   }
 };
 
@@ -2055,6 +2093,8 @@ public:
     AK_DebugComment,
     AK_CustomCXX,
     AK_BuildMI,
+    AK_EraseInst,
+    AK_ReplaceReg,
     AK_ConstraintOpsToDef,
     AK_ConstraintOpsToRC,
     AK_MakeTempReg,
@@ -2065,6 +2105,10 @@ public:
   ActionKind getKind() const { return Kind; }
 
   virtual ~MatchAction() {}
+
+  // Some actions may need to add extra predicates to ensure they can run.
+  virtual void emitAdditionalPredicates(MatchTable &Table,
+                                        RuleMatcher &Rule) const {}
 
   /// Emit the MatchTable opcodes to implement the action.
   virtual void emitActionOpcodes(MatchTable &Table,
@@ -2140,6 +2184,46 @@ public:
     return *static_cast<Kind *>(OperandRenderers.back().get());
   }
 
+  void emitActionOpcodes(MatchTable &Table, RuleMatcher &Rule) const override;
+};
+
+class EraseInstAction : public MatchAction {
+  unsigned InsnID;
+
+public:
+  EraseInstAction(unsigned InsnID)
+      : MatchAction(AK_EraseInst), InsnID(InsnID) {}
+
+  static bool classof(const MatchAction *A) {
+    return A->getKind() == AK_EraseInst;
+  }
+
+  void emitActionOpcodes(MatchTable &Table, RuleMatcher &Rule) const override;
+  static void emitActionOpcodes(MatchTable &Table, RuleMatcher &Rule,
+                                unsigned InsnID);
+};
+
+class ReplaceRegAction : public MatchAction {
+  unsigned OldInsnID, OldOpIdx;
+  unsigned NewInsnId = -1, NewOpIdx;
+  unsigned TempRegID = -1;
+
+public:
+  ReplaceRegAction(unsigned OldInsnID, unsigned OldOpIdx, unsigned NewInsnId,
+                   unsigned NewOpIdx)
+      : MatchAction(AK_EraseInst), OldInsnID(OldInsnID), OldOpIdx(OldOpIdx),
+        NewInsnId(NewInsnId), NewOpIdx(NewOpIdx) {}
+
+  ReplaceRegAction(unsigned OldInsnID, unsigned OldOpIdx, unsigned TempRegID)
+      : MatchAction(AK_EraseInst), OldInsnID(OldInsnID), OldOpIdx(OldOpIdx),
+        TempRegID(TempRegID) {}
+
+  static bool classof(const MatchAction *A) {
+    return A->getKind() == AK_ReplaceReg;
+  }
+
+  void emitAdditionalPredicates(MatchTable &Table,
+                                RuleMatcher &Rule) const override;
   void emitActionOpcodes(MatchTable &Table, RuleMatcher &Rule) const override;
 };
 

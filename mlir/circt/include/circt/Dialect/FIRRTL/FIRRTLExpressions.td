@@ -1087,6 +1087,25 @@ def ObjectSubfieldOp : FIRRTLOp<"object.subfield",
   }];
 }
 
+def ObjectAnyRefCastOp : FIRRTLOp<"object.anyref_cast", [Pure]> {
+  let summary = "Cast object reference to anyref.";
+  let description = [{
+    Cast any object reference to AnyRef type. This is needed for passing objects
+    of a known class to sinks that accept any reference.
+
+    Example
+    ```
+      %0= firrtl.object.anyref_cast %object : !firrtl.class<@Foo()>
+    ```
+    }];
+
+  let arguments = (ins ClassType:$input);
+  let results = (outs AnyRefType:$result);
+
+  let assemblyFormat =
+     "$input attr-dict `:` type($input)";
+}
+
 def StringConstantOp : FIRRTLOp<"string", [Pure, ConstantLike]> {
   let summary = "Produce a constant string value";
   let description = [{
@@ -1115,24 +1134,93 @@ def FIntegerConstantOp : FIRRTLOp<"integer", [Pure, ConstantLike]> {
   }];
   let arguments = (ins APSIntAttr:$value);
   let results = (outs FIntegerType:$result);
+  let hasFolder = 1;
   let hasCustomAssemblyFormat = true;
 }
 
-def PathOp : FIRRTLOp<"path", [Pure,
-                  DeclareOpInterfaceMethods<InnerRefUserOpInterface>]> {
+def UnresolvedPathOp : FIRRTLOp<"unresolved_path", [Pure]> {
   let summary = "Produce a path value";
   let description = [{
     Produces a value which represents a path to the target in a design.
 
     Example:
     ```mlir
-    %w = firrtl.wire sym @wire : !firrtl.uint<1>
-    %0 = firrtl.path <@foo::@wire>
+    0 = firrtl.unresolved_path "~Circuit|Module>w"
     ```
   }];
-  let arguments = (ins InnerRefAttr:$target);
+  let arguments = (ins StrAttr:$target);
   let results = (outs PathType:$result);
   let assemblyFormat = "$target attr-dict";
+}
+
+def PathOp : FIRRTLOp<"path", [Pure]> {
+  let summary = "Produce a path value";
+  let description = [{
+    Produces a value which represents a path to the target in a design.
+
+    Example:
+    ```mlir
+    hw.hierpath @Path [@Foo::@bar, @Bar]
+    %wire = firrtl.wire {annotations = [ {class = "circt.tracker", id = distinct[0]<>, circt.nonlocal = @Path} ]} : !firrtl.uint<1>
+    %0 = firrtl.path reference distinct[0]<>
+    ```
+  }];
+  let arguments = (ins TargetKind:$targetKind,
+                       DistinctAttr:$target);
+  let results = (outs PathType:$result);
+  let assemblyFormat = "$targetKind $target attr-dict";
+}
+
+def ListCreateOp : FIRRTLOp<"list.create", [Pure, SameTypeOperands]> {
+  let summary = "Produce a list value";
+  let description = [{
+    Produces a value of list type containing the provided elements.
+
+    Example:
+    ```mlir
+    %3 = firrtl.list.create %0, %1, %2 : !firrtl.list<string>
+    ```
+  }];
+
+  let arguments = (ins Variadic<PropertyType>:$elements);
+  let results = (outs ListType:$result);
+
+  let hasCustomAssemblyFormat = 1;
+  let hasVerifier = 1;
+}
+
+def MapCreateOp : FIRRTLOp<"map.create", [Pure, SameVariadicOperandSize]> {
+  let summary = "Produce a map value";
+  let description = [{
+    Produces a value of map type containing the provided key/value elements.
+
+    Example:
+    ```mlir
+    %4 = firrtl.map.create (%0 -> %1, %2 -> %3) : !firrtl.map<string, integer>
+    ```
+  }];
+
+  let arguments = (ins Variadic<PropertyType>:$keys, Variadic<PropertyType>:$values);
+  let results = (outs MapType:$result);
+
+  let hasCustomAssemblyFormat = 1;
+  let hasVerifier = 1;
+}
+
+def BoolConstantOp : FIRRTLOp<"bool", [Pure, ConstantLike]> {
+  let summary = "Produce a constant boolean value";
+  let description = [{
+    Produces a constant value of boolean type.
+
+    Example:
+    ```mlir
+    %0 = firrtl.bool true
+    ```
+  }];
+  let arguments = (ins BoolAttr:$value);
+  let results = (outs BoolType:$result);
+  let hasFolder = 1;
+  let assemblyFormat = "$value attr-dict";
 }
 
 //===----------------------------------------------------------------------===//

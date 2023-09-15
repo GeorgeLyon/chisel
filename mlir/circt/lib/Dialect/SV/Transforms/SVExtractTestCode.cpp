@@ -38,47 +38,48 @@ using BindTable = DenseMap<StringAttr, SmallDenseMap<StringAttr, sv::BindOp>>;
 //===----------------------------------------------------------------------===//
 
 // Reimplemented from SliceAnalysis to use a worklist rather than recursion and
-// non-insert ordered set.
+// non-insert ordered set.  Implement this as a DFS and not a BFS so that the
+// order is stable across changes to intermediary operations.  (It is then
+// necessary to use the _operands_ as a worklist and not the _operations_.)
 static void
 getBackwardSliceSimple(Operation *rootOp, SetVector<Operation *> &backwardSlice,
                        llvm::function_ref<bool(Operation *)> filter) {
-  SmallVector<Operation *> worklist;
-  worklist.push_back(rootOp);
+  SmallVector<Value> worklist(rootOp->getOperands());
 
   while (!worklist.empty()) {
-    Operation *op = worklist.back();
-    worklist.pop_back();
+    Value operand = worklist.pop_back_val();
+    Operation *definingOp = operand.getDefiningOp();
 
-    if (!op || op->hasTrait<mlir::OpTrait::IsIsolatedFromAbove>())
+    if (!definingOp ||
+        definingOp->hasTrait<mlir::OpTrait::IsIsolatedFromAbove>())
       continue;
 
     // Evaluate whether we should keep this def.
     // This is useful in particular to implement scoping; i.e. return the
     // transitive backwardSlice in the current scope.
-    if (filter && !filter(op))
+    if (filter && !filter(definingOp))
       continue;
 
-    for (auto en : llvm::enumerate(op->getOperands())) {
-      auto operand = en.value();
-      if (auto *definingOp = operand.getDefiningOp()) {
-        if (!backwardSlice.contains(definingOp))
-          worklist.push_back(definingOp);
-      } else if (auto blockArg = operand.dyn_cast<BlockArgument>()) {
-        Block *block = blockArg.getOwner();
-        Operation *parentOp = block->getParentOp();
-        // TODO: determine whether we want to recurse backward into the other
-        // blocks of parentOp, which are not technically backward unless they
-        // flow into us. For now, just bail.
-        assert(parentOp->getNumRegions() == 1 &&
-               parentOp->getRegion(0).getBlocks().size() == 1);
-        if (!backwardSlice.contains(parentOp))
-          worklist.push_back(parentOp);
-      } else {
-        llvm_unreachable("No definingOp and not a block argument.");
-      }
+    if (definingOp) {
+      if (!backwardSlice.contains(definingOp))
+        for (auto newOperand : llvm::reverse(definingOp->getOperands()))
+          worklist.push_back(newOperand);
+    } else if (auto blockArg = operand.dyn_cast<BlockArgument>()) {
+      Block *block = blockArg.getOwner();
+      Operation *parentOp = block->getParentOp();
+      // TODO: determine whether we want to recurse backward into the other
+      // blocks of parentOp, which are not technically backward unless they
+      // flow into us. For now, just bail.
+      assert(parentOp->getNumRegions() == 1 &&
+             parentOp->getRegion(0).getBlocks().size() == 1);
+      if (!backwardSlice.contains(parentOp))
+        for (auto newOperand : llvm::reverse(parentOp->getOperands()))
+          worklist.push_back(newOperand);
+    } else {
+      llvm_unreachable("No definingOp and not a block argument.");
     }
 
-    backwardSlice.insert(op);
+    backwardSlice.insert(definingOp);
   }
 }
 
@@ -135,7 +136,8 @@ getBackwardSlice(hw::HWModuleOp module,
   return getBackwardSlice(roots, filterFn);
 }
 
-static StringAttr getNameForPort(Value val, ArrayAttr modulePorts) {
+static StringAttr getNameForPort(Value val,
+                                 SmallVector<mlir::Attribute> modulePorts) {
   if (auto bv = val.dyn_cast<BlockArgument>())
     return modulePorts[bv.getArgNumber()].cast<StringAttr>();
 
@@ -200,7 +202,7 @@ static hw::HWModuleOp createModuleForCut(hw::HWModuleOp op,
   // Construct the ports, this is just the input Values
   SmallVector<hw::PortInfo> ports;
   {
-    auto srcPorts = op.getArgNames();
+    auto srcPorts = op.getInputNames();
     for (auto port : llvm::enumerate(realInputs)) {
       auto name = getNameForPort(port.value(), srcPorts);
       ports.push_back(
@@ -340,7 +342,7 @@ inlineInputOnly(hw::HWModuleOp oldMod, hw::InstanceGraph &instanceGraph,
                 llvm::DenseSet<hw::InnerRefAttr> &innerRefUsedByNonBindOp) {
 
   // Check if the module only has inputs.
-  if (oldMod.getNumOutputs() != 0)
+  if (oldMod.getNumOutputPorts() != 0)
     return;
 
   // Check if it's ok to inline. We cannot inline the module if there exists a
@@ -405,7 +407,7 @@ inlineInputOnly(hw::HWModuleOp oldMod, hw::InstanceGraph &instanceGraph,
 
     // Build a mapping from module block arguments to instance inputs.
     IRMapping mapping;
-    assert(inst.getInputs().size() == oldMod.getNumInputs());
+    assert(inst.getInputs().size() == oldMod.getNumInputPorts());
     auto inputPorts = oldMod.getBodyBlock()->getArguments();
     for (size_t i = 0, e = inputPorts.size(); i < e; ++i)
       mapping.map(inputPorts[i], inst.getOperand(i));
@@ -792,7 +794,7 @@ void SVExtractTestCodeImplPass::runOnOperation() {
                    bindTable, opsToErase, opsInDesign);
 
       // If nothing is extracted and the module has an output, we are done.
-      if (!anyThingExtracted && rtlmod.getNumOutputs() != 0)
+      if (!anyThingExtracted && rtlmod.getNumOutputPorts() != 0)
         continue;
 
       // Here, erase extracted operations as well as dead operations.

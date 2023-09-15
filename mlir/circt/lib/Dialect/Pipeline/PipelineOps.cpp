@@ -11,16 +11,18 @@
 //===----------------------------------------------------------------------===//
 
 #include "circt/Dialect/Pipeline/PipelineOps.h"
+#include "circt/Support/ParsingUtils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/FunctionImplementation.h"
+#include "mlir/Interfaces/FunctionImplementation.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FormatVariadic.h"
 
 using namespace mlir;
 using namespace circt;
 using namespace circt::pipeline;
+using namespace circt::parsing_util;
 
 #include "circt/Dialect/Pipeline/PipelineDialect.cpp.inc"
 
@@ -77,48 +79,6 @@ Block *circt::pipeline::getParentStageInPipeline(ScheduledPipelineOp pipeline,
 //===----------------------------------------------------------------------===//
 // Fancy pipeline-like op printer/parser functions.
 //===----------------------------------------------------------------------===//
-
-// An initializer list is a list of operands, types and names on the format:
-//  (%arg = %input : type, ...)
-static ParseResult parseInitializerList(
-    OpAsmParser &parser,
-    llvm::SmallVector<OpAsmParser::Argument> &inputArguments,
-    llvm::SmallVector<OpAsmParser::UnresolvedOperand> &inputOperands,
-    llvm::SmallVector<Type> &inputTypes, ArrayAttr &inputNames) {
-
-  llvm::SmallVector<Attribute> names;
-  if (failed(parser.parseCommaSeparatedList(
-          OpAsmParser::Delimiter::Paren, [&]() -> ParseResult {
-            OpAsmParser::UnresolvedOperand inputOperand;
-            Type type;
-            auto &arg = inputArguments.emplace_back();
-            if (parser.parseArgument(arg) || parser.parseColonType(type) ||
-                parser.parseEqual() || parser.parseOperand(inputOperand))
-              return failure();
-
-            inputOperands.push_back(inputOperand);
-            inputTypes.push_back(type);
-            arg.type = type;
-            names.push_back(StringAttr::get(
-                parser.getContext(),
-                /*drop leading %*/ arg.ssaName.name.drop_front()));
-            return success();
-          })))
-    return failure();
-
-  inputNames = ArrayAttr::get(parser.getContext(), names);
-  return success();
-}
-
-static void printInitializerList(OpAsmPrinter &p, ValueRange ins,
-                                 ArrayRef<BlockArgument> args) {
-  p << "(";
-  llvm::interleaveComma(llvm::zip(ins, args), p, [&](auto it) {
-    auto [in, arg] = it;
-    p << arg << " : " << in.getType() << " = " << in;
-  });
-  p << ")";
-}
 
 // Parses a list of operands on the format:
 //   (name : type, ...)
@@ -309,15 +269,15 @@ static void printPipelineOp(OpAsmPrinter &p, TPipelineOp op) {
   printKeywordAssignment(p, "reset", op.getInnerReset(), op.getReset());
   p << " ";
   printKeywordAssignment(p, "go", op.getInnerGo(), op.getGo());
+  // Print the optional attribute dict.
+  p.printOptionalAttrDict(op->getAttrs(),
+                          /*elidedAttrs=*/{"name", "operandSegmentSizes",
+                                           "outputNames", "inputNames"});
   p << " -> ";
 
   // Print the output list.
   printOutputList(p, op.getDataOutputs().getTypes(), op.getOutputNames());
 
-  // Print the optional attribute dict.
-  p.printOptionalAttrDict(op->getAttrs(),
-                          /*elidedAttrs=*/{"name", "operandSegmentSizes",
-                                           "outputNames", "inputNames"});
   p << " ";
 
   // Print the inner region, eliding the entry block arguments - we've already
@@ -354,7 +314,7 @@ void ScheduledPipelineOp::build(OpBuilder &odsBuilder, OperationState &odsState,
                                 TypeRange dataOutputs, ValueRange inputs,
                                 ArrayAttr inputNames, ArrayAttr outputNames,
                                 Value clock, Value reset, Value go, Value stall,
-                                StringAttr name) {
+                                StringAttr name, ArrayAttr stallability) {
   odsState.addOperands(inputs);
   if (stall)
     odsState.addOperands(stall);
@@ -399,6 +359,9 @@ void ScheduledPipelineOp::build(OpBuilder &odsBuilder, OperationState &odsState,
 
   // entry stage valid signal.
   entryBlock.addArgument(i1, odsState.location);
+
+  if (stallability)
+    odsState.addAttribute("stallability", stallability);
 }
 
 Block *ScheduledPipelineOp::addStage() {
@@ -425,11 +388,49 @@ void ScheduledPipelineOp::getAsmBlockArgumentNames(
       setNameFn(getInnerGo(), "g");
 
     } else {
-      for (auto [argi, arg] : llvm::enumerate(block.getArguments().drop_back()))
-        setNameFn(arg, llvm::formatv("s{0}_arg{1}", i, argi).str());
-      // Last argument in any (non-entry) stage is the stage valid signal.
+      // Predecessor stageOp might have register and passthrough names
+      // specified, which we can use to name the block arguments.
+      auto predStageOp =
+          cast<StageOp>(block.getSinglePredecessor()->getTerminator());
+      size_t nRegs = predStageOp.getRegisters().size();
+      auto nPassthrough = predStageOp.getPassthroughs().size();
+
+      auto regNames = predStageOp.getRegisterNames();
+      auto passthroughNames = predStageOp.getPassthroughNames();
+
+      // Register naming...
+      for (size_t regI = 0; regI < nRegs; ++regI) {
+        auto arg = block.getArguments()[regI];
+
+        if (regNames) {
+          auto nameAttr = (*regNames)[regI].dyn_cast<StringAttr>();
+          if (nameAttr && !nameAttr.strref().empty()) {
+            setNameFn(arg, nameAttr);
+            continue;
+          }
+        }
+        setNameFn(arg, llvm::formatv("s{0}_reg{1}", i, regI).str());
+      }
+
+      // Passthrough naming...
+      for (size_t passthroughI = 0; passthroughI < nPassthrough;
+           ++passthroughI) {
+        auto arg = block.getArguments()[nRegs + passthroughI];
+
+        if (passthroughNames) {
+          auto nameAttr =
+              (*passthroughNames)[passthroughI].dyn_cast<StringAttr>();
+          if (nameAttr && !nameAttr.strref().empty()) {
+            setNameFn(arg, nameAttr);
+            continue;
+          }
+        }
+        setNameFn(arg, llvm::formatv("s{0}_pass{1}", i, passthroughI).str());
+      }
+
+      // Last argument in any (non-entry) stage is the stage enable signal.
       setNameFn(block.getArguments().back(),
-                llvm::formatv("s{0}_valid", i).str());
+                llvm::formatv("s{0}_enable", i).str());
     }
   }
 }
@@ -560,7 +561,59 @@ LogicalResult ScheduledPipelineOp::verify() {
     }
   }
 
+  if (auto stallability = getStallability()) {
+    // Only allow specifying stallability if there is a stall signal.
+    if (!hasStall())
+      return emitOpError("cannot specify stallability without a stall signal.");
+
+    // Ensure that the # of stages is equal to the length of the stallability
+    // array - the exit stage is never stallable.
+    size_t nRegisterStages = stages.size() - 1;
+    if (stallability->size() != nRegisterStages)
+      return emitOpError("stallability array must be the same length as the "
+                         "number of stages. Pipeline has ")
+             << nRegisterStages << " stages but array had "
+             << stallability->size() << " elements.";
+  }
+
   return success();
+}
+
+StageKind ScheduledPipelineOp::getStageKind(size_t stageIndex) {
+  size_t nStages = getNumStages();
+  assert(stageIndex < nStages && "invalid stage index");
+
+  if (!hasStall())
+    return StageKind::Continuous;
+
+  // There is a stall signal - also check whether stage-level stallability is
+  // specified.
+  std::optional<ArrayAttr> stallability = getStallability();
+  if (!stallability) {
+    // All stages are stallable.
+    return StageKind::Stallable;
+  }
+
+  if (stageIndex < stallability->size()) {
+    bool stageIsStallable =
+        (*stallability)[stageIndex].cast<BoolAttr>().getValue();
+    if (!stageIsStallable) {
+      // This is a non-stallable stage.
+      return StageKind::NonStallable;
+    }
+  }
+
+  // Walk backwards from this stage to see if any non-stallable stage exists.
+  // If so, this is a runoff stage.
+  // TODO: This should be a pre-computed property.
+  if (stageIndex == 0)
+    return StageKind::Stallable;
+
+  for (size_t i = stageIndex - 1; i > 0; --i) {
+    if (getStageKind(i) == StageKind::NonStallable)
+      return StageKind::Runoff;
+  }
+  return StageKind::Stallable;
 }
 
 //===----------------------------------------------------------------------===//
@@ -787,12 +840,37 @@ void StageOp::build(OpBuilder &odsBuilder, OperationState &odsState,
                         odsBuilder.getI64ArrayAttr(clockGatesPerRegister));
 }
 
+void StageOp::build(OpBuilder &odsBuilder, OperationState &odsState,
+                    Block *dest, ValueRange registers, ValueRange passthroughs,
+                    llvm::ArrayRef<llvm::SmallVector<Value>> clockGateList,
+                    mlir::ArrayAttr registerNames,
+                    mlir::ArrayAttr passthroughNames) {
+  build(odsBuilder, odsState, dest, registers, passthroughs);
+
+  llvm::SmallVector<Value> clockGates;
+  llvm::SmallVector<int64_t> clockGatesPerRegister(registers.size(), 0);
+  for (auto gates : clockGateList) {
+    llvm::append_range(clockGates, gates);
+    clockGatesPerRegister.push_back(gates.size());
+  }
+  odsState.attributes.set("clockGatesPerRegister",
+                          odsBuilder.getI64ArrayAttr(clockGatesPerRegister));
+  odsState.addOperands(clockGates);
+
+  if (registerNames)
+    odsState.addAttribute("registerNames", registerNames);
+
+  if (passthroughNames)
+    odsState.addAttribute("passthroughNames", passthroughNames);
+}
+
 ValueRange StageOp::getClockGatesForReg(unsigned regIdx) {
   assert(regIdx < getRegisters().size() && "register index out of bounds.");
 
-  // TODO: This could be optimized quite a bit if we didn't store clock gates
-  // per register as an array of sizes... look into using properties and maybe
-  // attaching a more complex datastructure to reduce compute here.
+  // TODO: This could be optimized quite a bit if we didn't store clock
+  // gates per register as an array of sizes... look into using properties
+  // and maybe attaching a more complex datastructure to reduce compute
+  // here.
 
   unsigned clockGateStartIdx = 0;
   for (auto [index, nClockGatesAttr] :
@@ -811,7 +889,8 @@ ValueRange StageOp::getClockGatesForReg(unsigned regIdx) {
 }
 
 LogicalResult StageOp::verify() {
-  // Verify that the target block has the correct arguments as this stage op.
+  // Verify that the target block has the correct arguments as this stage
+  // op.
   llvm::SmallVector<Type> expectedTargetArgTypes;
   llvm::append_range(expectedTargetArgTypes, getRegisters().getTypes());
   llvm::append_range(expectedTargetArgTypes, getPassthroughs().getTypes());
@@ -838,6 +917,22 @@ LogicalResult StageOp::verify() {
   if (getClockGatesPerRegister().size() != getRegisters().size())
     return emitOpError("expected clockGatesPerRegister to be equally sized to "
                        "the number of registers.");
+
+  // Verify that, if provided, the list of register names is equally sized
+  // to the number of registers.
+  if (auto regNames = getRegisterNames()) {
+    if (regNames->size() != getRegisters().size())
+      return emitOpError("expected registerNames to be equally sized to "
+                         "the number of registers.");
+  }
+
+  // Verify that, if provided, the list of passthrough names is equally sized
+  // to the number of passthroughs.
+  if (auto passthroughNames = getPassthroughNames()) {
+    if (passthroughNames->size() != getPassthroughs().size())
+      return emitOpError("expected passthroughNames to be equally sized to "
+                         "the number of passthroughs.");
+  }
 
   return success();
 }
@@ -876,15 +971,15 @@ LogicalResult LatencyOp::verify() {
     for (auto &use : res.getUses()) {
       auto *user = use.getOwner();
 
-      // The user may reside within a block which is not a stage (e.g. inside
-      // a pipeline.latency op). Determine the stage which this use resides
-      // within.
+      // The user may reside within a block which is not a stage (e.g.
+      // inside a pipeline.latency op). Determine the stage which this use
+      // resides within.
       Block *userStage =
           getParentStageInPipeline(scheduledPipelineParent, user);
       unsigned useDistance = stageDistance(definingStage, userStage);
 
-      // Is this a stage op and is the value passed through? if so, this is a
-      // legal use.
+      // Is this a stage op and is the value passed through? if so, this is
+      // a legal use.
       StageOp stageOp = dyn_cast<StageOp>(user);
       if (userStage == definingStage && stageOp) {
         if (llvm::is_contained(stageOp.getPassthroughs(), res))
@@ -892,8 +987,8 @@ LogicalResult LatencyOp::verify() {
       }
 
       // The use is not a passthrough. Check that the distance between
-      // the defining stage and the user stage is at least the latency of the
-      // result.
+      // the defining stage and the user stage is at least the latency of
+      // the result.
       if (useDistance < latency) {
         auto diag = emitOpError("result ")
                     << i << " is used before it is available.";

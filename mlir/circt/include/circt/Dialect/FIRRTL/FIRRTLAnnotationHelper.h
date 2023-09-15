@@ -16,6 +16,7 @@
 #include "circt/Dialect/FIRRTL/CHIRRTLDialect.h"
 #include "circt/Dialect/FIRRTL/FIRRTLInstanceGraph.h"
 #include "circt/Dialect/FIRRTL/FIRRTLOps.h"
+#include "circt/Dialect/HW/HWOps.h"
 #include "circt/Dialect/HW/InnerSymbolNamespace.h"
 #include "llvm/ADT/TypeSwitch.h"
 
@@ -308,32 +309,53 @@ struct ModuleModifications {
   SmallVector<uturnPair> uturns;
 };
 
+/// A cache of existing HierPathOps, mostly used to facilitate HierPathOp reuse.
+struct HierPathCache {
+  HierPathCache(Operation *op, SymbolTable &symbolTable);
+
+  hw::HierPathOp getOpFor(ArrayAttr attr);
+
+  StringAttr getSymFor(ArrayAttr attr) {
+    return getOpFor(attr).getSymNameAttr();
+  }
+
+  FlatSymbolRefAttr getRefFor(ArrayAttr attr) {
+    return FlatSymbolRefAttr::get(getSymFor(attr));
+  }
+
+private:
+  OpBuilder builder;
+  DenseMap<ArrayAttr, hw::HierPathOp> cache;
+  SymbolTable &symbolTable;
+};
+
 /// State threaded through functions for resolving and applying annotations.
 struct ApplyState {
   using AddToWorklistFn = llvm::function_ref<void(DictionaryAttr)>;
   ApplyState(CircuitOp circuit, SymbolTable &symTbl,
              AddToWorklistFn addToWorklistFn,
-             InstancePathCache &instancePathCache)
+             InstancePathCache &instancePathCache, bool noRefTypePorts)
       : circuit(circuit), symTbl(symTbl), addToWorklistFn(addToWorklistFn),
-        instancePathCache(instancePathCache) {}
+        instancePathCache(instancePathCache), hierPathCache(circuit, symTbl),
+        noRefTypePorts(noRefTypePorts) {}
 
   CircuitOp circuit;
   SymbolTable &symTbl;
   CircuitTargetCache targetCaches;
   AddToWorklistFn addToWorklistFn;
   InstancePathCache &instancePathCache;
-  DenseMap<Attribute, FlatSymbolRefAttr> instPathToNLAMap;
+  HierPathCache hierPathCache;
   size_t numReusedHierPaths = 0;
+
+  // Options that control annotation lowering.
+  bool noRefTypePorts;
 
   DenseSet<InstanceOp> wiringProblemInstRefs;
   DenseMap<StringAttr, LegacyWiringProblem> legacyWiringProblems;
   SmallVector<WiringProblem> wiringProblems;
 
   hw::InnerSymbolNamespace &getNamespace(FModuleLike module) {
-    auto &ptr = namespaces[module];
-    if (!ptr)
-      ptr = std::make_unique<hw::InnerSymbolNamespace>(module);
-    return *ptr;
+    return namespaces[module];
   }
 
   IntegerAttr newID() {
@@ -342,7 +364,7 @@ struct ApplyState {
   };
 
 private:
-  DenseMap<Operation *, std::unique_ptr<hw::InnerSymbolNamespace>> namespaces;
+  hw::InnerSymbolNamespaceCollection namespaces;
   unsigned annotationID = 0;
 };
 

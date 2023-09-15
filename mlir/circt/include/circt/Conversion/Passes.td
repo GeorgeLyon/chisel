@@ -217,8 +217,6 @@ def PipelineToHW : Pass<"lower-pipeline-to-hw", "mlir::ModuleOp"> {
     "hw::HWDialect", "comb::CombDialect", "seq::SeqDialect"
   ];
   let options = [
-    Option<"outlineStages", "outline-stages", "bool", "false",
-      "Outline each stage to a separate `hw.module`.">,
     Option<"clockGateRegs", "clock-gate-regs", "bool", "false",
       "Clock gate each register instead of (default) input muxing  (ASIC optimization).">
   ];
@@ -237,6 +235,25 @@ def CalyxToHW : Pass<"lower-calyx-to-hw", "mlir::ModuleOp"> {
   let dependentDialects = ["comb::CombDialect", "hw::HWDialect",
                            "seq::SeqDialect", "sv::SVDialect"];
 }
+
+//===----------------------------------------------------------------------===//
+// CalyxNative
+//===----------------------------------------------------------------------===//
+def CalyxNative : Pass<"calyx-native", "mlir::ModuleOp"> {
+  let summary = "Callout to the Calyx native compiler and run a pass pipeline";
+  let description = [{
+    This pass calls out to the native, Rust-based Calyx compiler to run passes
+    with it and generate a new, valid, calyx dialect program.
+  }];
+  let constructor = "circt::createCalyxNativePass()";
+  let dependentDialects = ["calyx::CalyxDialect"];
+  let options = [
+    Option<"passPipeline", "pass-pipeline", "std::string",
+            "", "Passes to run with the native compiler">,
+  ];
+}
+
+
 
 //===----------------------------------------------------------------------===//
 // CalyxToFSM
@@ -558,12 +575,12 @@ def LowerVerifToSV : Pass<"lower-verif-to-sv", "hw::HWModuleOp"> {
 }
 
 //===----------------------------------------------------------------------===//
-// StandardToHandshake
+// CFToHandshake
 //===----------------------------------------------------------------------===//
 
-def StandardToHandshake : Pass<"lower-std-to-handshake", "mlir::ModuleOp"> {
-  let summary = "Lower Standard MLIR into Handshake IR";
-  let constructor = "circt::createStandardToHandshakePass()";
+def CFToHandshake : Pass<"lower-cf-to-handshake", "mlir::ModuleOp"> {
+  let summary = "Lower func and CF into Handshake IR";
+  let constructor = "circt::createCFToHandshakePass()";
   let dependentDialects = ["handshake::HandshakeDialect"];
   let options =
     [Option<"sourceConstants", "source-constants", "bool", "false",
@@ -578,36 +595,6 @@ def StandardToHandshake : Pass<"lower-std-to-handshake", "mlir::ModuleOp"> {
 def HandshakeRemoveBlock : Pass<"handshake-remove-block-structure", "handshake::FuncOp"> {
   let summary = "Remove block structure in Handshake IR";
   let constructor = "circt::createHandshakeRemoveBlockPass()";
-}
-
-def InsertMergeBlocks : Pass<"insert-merge-blocks", "::mlir::ModuleOp"> {
-  let summary = "Insert explicit merge blocks";
-  let description = [{
-    This pass inserts additional merge blocks for each block with more than
-    two successors. A merge block is a block that only contains one operation,
-    a terminator, and has two predecessors.
-    The order successors are merged together mirrors the order different control
-    paths are created. Thus, each block with two successors will have a corresponding
-    merge block.
-
-    This pass brings the CFG into a canonical form for further transformations.
-
-    Treats loops and sub-CFGs with irregular control flow like single blocks.
-  }];
-  let constructor = "circt::createInsertMergeBlocksPass()";
-  let dependentDialects = ["mlir::cf::ControlFlowDialect", "mlir::func::FuncDialect"];
-}
-
-def MaximizeSSA : Pass<"maximize-ssa", "::mlir::ModuleOp"> {
-  let summary = "Convert every function in the module into maximal SSA form";
-  let description = [{
-    Convert the region within every function into maximal SSA form. This
-    ensures that every value used within a block is also defined within the
-    block, making dataflow explicit and removing block dominance-based dataflow
-    semantics. The pass achieves this by adding block arguments wherever
-    necessary to forward values to the block(s) where they are used.
-  }];
-  let constructor = "circt::createMaximizeSSAPass()";
 }
 
 //===----------------------------------------------------------------------===//
@@ -650,6 +637,40 @@ def LowerArcToLLVM : Pass<"lower-arc-to-llvm", "mlir::ModuleOp"> {
     "mlir::scf::SCFDialect",
     "mlir::func::FuncDialect"
   ];
+}
+
+//===----------------------------------------------------------------------===//
+// ConvertSeqToSV
+//===----------------------------------------------------------------------===//
+
+def LowerSeqToSV: Pass<"lower-seq-to-sv",  "mlir::ModuleOp"> {
+  let summary = "Lower sequential firrtl ops to SV.";
+  let constructor = "circt::createLowerSeqToSVPass()";
+  let dependentDialects = ["circt::sv::SVDialect", "circt::hw::HWDialect"];
+  let options = [
+    Option<"disableRegRandomization", "disable-reg-randomization", "bool", "false",
+           "Disable emission of register randomization code">,
+    Option<"emitSeparateAlwaysBlocks", "emit-separate-always-blocks", "bool", "false",
+           "Emit assigments to registers in separate always blocks">,
+    Option<"lowerToAlwaysFF", "lower-to-always-ff", "bool", "true",
+           "Place assignments to registers into `always_ff` blocks">
+  ];
+  let statistics = [
+    Statistic<"numSubaccessRestored", "num-subaccess-restored",
+      "Number of lhs subaccess operations restored ">
+  ];
+}
+
+def LowerFirMem : Pass<"lower-seq-firmem", "mlir::ModuleOp"> {
+  let summary = "Lower seq.firmem ops to instances of hw.module.generated ops";
+  let constructor = "circt::createLowerFirMemPass()";
+  let dependentDialects = ["circt::hw::HWDialect"];
+}
+
+def LowerSeqFIRRTLInitToSV: Pass<"lower-seq-firrtl-init-to-sv", "mlir::ModuleOp"> {
+  let summary = "Prep the module with macro definitions for firrtl registers.";
+  let constructor = "circt::createLowerSeqFIRRTLInitToSV()";
+  let dependentDialects = ["circt::sv::SVDialect"];
 }
 
 #endif // CIRCT_CONVERSION_PASSES_TD

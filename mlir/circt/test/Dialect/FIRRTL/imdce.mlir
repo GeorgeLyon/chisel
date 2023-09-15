@@ -93,7 +93,6 @@ firrtl.circuit "top"  {
 
   // CHECK-LABEL: firrtl.module @top(in %clock: !firrtl.clock, in %input: !firrtl.uint<1>) {
   // CHECK-NEXT:  }
-  // expected-warning @+1 {{module `top` is empty but cannot be removed because the module is public}}
   firrtl.module @top(in %clock: !firrtl.clock, in %input: !firrtl.uint<1>) {
     %tile_input, %tile_output = firrtl.instance tile  @Child1(in input: !firrtl.uint<1>, out output: !firrtl.uint<1>)
     firrtl.strictconnect %tile_input, %input : !firrtl.uint<1>
@@ -251,7 +250,6 @@ firrtl.circuit "RefPorts" {
 
 firrtl.circuit "MemoryInDeadCycle" {
   // CHECK-LABEL: firrtl.module public @MemoryInDeadCycle
-  // expected-warning @+1{{module `MemoryInDeadCycle` is empty but cannot be removed because the module is public}}
   firrtl.module public @MemoryInDeadCycle(in %clock: !firrtl.clock, in %addr: !firrtl.uint<4>) {
 
     // CHECK-NOT: firrtl.mem
@@ -451,5 +449,43 @@ firrtl.circuit "Test" {
   firrtl.module private @Other(out %out : !firrtl.uint<1>) {
     %blah_out = firrtl.instance blah interesting_name @Blah(out out : !firrtl.uint<1>)
     firrtl.strictconnect %out, %blah_out : !firrtl.uint<1>
+  }
+}
+
+// -----
+// Test that a live use of a forceable declaration keeps it alive.
+// https://github.com/llvm/circt/issues/5898
+
+// CHECK-LABEL: circuit "Issue5898"
+firrtl.circuit "Issue5898" {
+  firrtl.module @Issue5898(in %x: !firrtl.uint<5>, out %p: !firrtl.rwprobe<uint<5>>) {
+    // CHECK: connect
+    %w, %w_ref = firrtl.wire forceable : !firrtl.uint<5>, !firrtl.rwprobe<uint<5>>
+    firrtl.strictconnect %w, %x : !firrtl.uint<5>
+    firrtl.ref.define %p, %w_ref : !firrtl.rwprobe<uint<5>>
+  }
+}
+
+// -----
+// Test that annotations keep declarations alive.
+// CHECK-LABEL: "AnnoAlive"
+firrtl.circuit "AnnoAlive" {
+  firrtl.module @AnnoAlive() {
+     // CHECK: firrtl.wire
+     firrtl.wire {annotations = [{class = "circt.test"}]} : !firrtl.uint
+  }
+}
+
+// -----
+// Test warning about not being able to remove dead public modules.
+
+// CHECK-LABEL: "DeadPublic"
+firrtl.circuit "DeadPublic" {
+  // CHECK: module @PublicDeadChild
+  // expected-warning @below {{module `PublicDeadChild` is empty but cannot be removed because the module is public}}
+  firrtl.module @PublicDeadChild() {}
+  // CHECK: module @DeadPublic
+  firrtl.module @DeadPublic() {
+     firrtl.instance pdc @PublicDeadChild()
   }
 }

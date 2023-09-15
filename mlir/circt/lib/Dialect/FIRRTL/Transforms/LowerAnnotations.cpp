@@ -118,21 +118,7 @@ static FlatSymbolRefAttr buildNLA(const AnnoPathValue &target,
       FlatSymbolRefAttr::get(target.ref.getModule().getModuleNameAttr()));
 
   auto instAttr = ArrayAttr::get(state.circuit.getContext(), insts);
-
-  // Re-use NLA for this path if already created.
-  auto it = state.instPathToNLAMap.find(instAttr);
-  if (it != state.instPathToNLAMap.end()) {
-    ++state.numReusedHierPaths;
-    return it->second;
-  }
-
-  // Create the NLA
-  auto nla = b.create<hw::HierPathOp>(state.circuit.getLoc(), "nla", instAttr);
-  state.symTbl.insert(nla);
-  nla.setVisibility(SymbolTable::Visibility::Private);
-  auto sym = FlatSymbolRefAttr::get(nla);
-  state.instPathToNLAMap.insert({instAttr, sym});
-  return sym;
+  return state.hierPathCache.getRefFor(instAttr);
 }
 
 /// Scatter breadcrumb annotations corresponding to non-local annotations
@@ -572,11 +558,11 @@ static const llvm::StringMap<AnnoRecord> annotationRecords{{
 /// Lookup a record for a given annotation class.  Optionally, returns the
 /// record for "circuit.missing" if the record doesn't exist.
 static const AnnoRecord *getAnnotationHandler(StringRef annoStr,
-                                              bool ignoreUnhandledAnno) {
+                                              bool ignoreAnnotationUnknown) {
   auto ii = annotationRecords.find(annoStr);
   if (ii != annotationRecords.end())
     return &ii->second;
-  if (ignoreUnhandledAnno)
+  if (ignoreAnnotationUnknown)
     return &annotationRecords.find("circt.missing")->second;
   return nullptr;
 }
@@ -597,9 +583,9 @@ struct LowerAnnotationsPass
   LogicalResult legacyToWiringProblems(ApplyState &state);
   LogicalResult solveWiringProblems(ApplyState &state);
 
-  bool ignoreUnhandledAnno = false;
-  bool ignoreClasslessAnno = false;
-  bool noRefTypePorts = false;
+  using LowerFIRRTLAnnotationsBase::ignoreAnnotationClassless;
+  using LowerFIRRTLAnnotationsBase::ignoreAnnotationUnknown;
+  using LowerFIRRTLAnnotationsBase::noRefTypePorts;
   SmallVector<DictionaryAttr> worklistAttrs;
 };
 } // end anonymous namespace
@@ -612,7 +598,7 @@ LogicalResult LowerAnnotationsPass::applyAnnotation(DictionaryAttr anno,
   StringRef annoClassVal;
   if (auto annoClass = anno.getNamed("class"))
     annoClassVal = cast<StringAttr>(annoClass->getValue()).getValue();
-  else if (ignoreClasslessAnno)
+  else if (ignoreAnnotationClassless)
     annoClassVal = "circt.missing";
   else
     return mlir::emitError(state.circuit.getLoc())
@@ -622,12 +608,12 @@ LogicalResult LowerAnnotationsPass::applyAnnotation(DictionaryAttr anno,
   auto *record = getAnnotationHandler(annoClassVal, false);
   if (!record) {
     ++numUnhandled;
-    if (!ignoreUnhandledAnno)
+    if (!ignoreAnnotationUnknown)
       return mlir::emitError(state.circuit.getLoc())
              << "Unhandled annotation: " << anno;
 
     // Try again, requesting the fallback handler.
-    record = getAnnotationHandler(annoClassVal, ignoreUnhandledAnno);
+    record = getAnnotationHandler(annoClassVal, ignoreAnnotationUnknown);
     assert(record);
   }
 
@@ -855,12 +841,12 @@ LogicalResult LowerAnnotationsPass::solveWiringProblems(ApplyState &state) {
     auto sources = sourcePaths[0];
     auto sinks = sinkPaths[0];
     while (!sources.empty() && !sinks.empty()) {
-      if (sources[0] != sinks[0])
+      if (sources.top() != sinks.top())
         break;
-      auto newLCA = sources[0];
+      auto newLCA = sources.top();
       lca = cast<FModuleOp>(instanceGraph.getReferencedModule(newLCA));
-      sources = sources.drop_front();
-      sinks = sinks.drop_front();
+      sources = sources.dropFront();
+      sinks = sinks.dropFront();
     }
 
     LLVM_DEBUG({
@@ -931,15 +917,17 @@ LogicalResult LowerAnnotationsPass::solveWiringProblems(ApplyState &state) {
              << "\" must be passive (no flips) when using references";
 
     // Record module modifications related to adding ports to modules.
-    auto addPorts = [&](ArrayRef<igraph::InstanceOpInterface> insts, Value val,
-                        Type tpe, Direction dir) {
+    auto addPorts = [&](igraph::InstancePath insts, Value val, Type tpe,
+                        Direction dir) {
       StringRef name, instName;
       for (auto inst : llvm::reverse(insts)) {
         auto mod = instanceGraph.getReferencedModule<FModuleOp>(inst);
         if (name.empty()) {
           if (problem.newNameHint.empty())
             name = state.getNamespace(mod).newName(
-                getFieldName(getFieldRefFromValue(val), /*nameSafe=*/true)
+                getFieldName(
+                    getFieldRefFromValue(val, /*lookThroughCasts=*/true),
+                    /*nameSafe=*/true)
                     .first +
                 "__bore");
           else
@@ -1083,7 +1071,8 @@ void LowerAnnotationsPass::runOnOperation() {
     worklistAttrs.push_back(anno);
   };
   InstancePathCache instancePathCache(getAnalysis<InstanceGraph>());
-  ApplyState state{circuit, modules, addToWorklist, instancePathCache};
+  ApplyState state{circuit, modules, addToWorklist, instancePathCache,
+                   noRefTypePorts};
   LLVM_DEBUG(llvm::dbgs() << "Processing annotations:\n");
   while (!worklistAttrs.empty()) {
     auto attr = worklistAttrs.pop_back_val();
@@ -1109,12 +1098,12 @@ void LowerAnnotationsPass::runOnOperation() {
 
 /// This is the pass constructor.
 std::unique_ptr<mlir::Pass>
-circt::firrtl::createLowerFIRRTLAnnotationsPass(bool ignoreUnhandledAnnotations,
-                                                bool ignoreClasslessAnnotations,
+circt::firrtl::createLowerFIRRTLAnnotationsPass(bool ignoreAnnotationUnknown,
+                                                bool ignoreAnnotationClassless,
                                                 bool noRefTypePorts) {
   auto pass = std::make_unique<LowerAnnotationsPass>();
-  pass->ignoreUnhandledAnno = ignoreUnhandledAnnotations;
-  pass->ignoreClasslessAnno = ignoreClasslessAnnotations;
+  pass->ignoreAnnotationUnknown = ignoreAnnotationUnknown;
+  pass->ignoreAnnotationClassless = ignoreAnnotationClassless;
   pass->noRefTypePorts = noRefTypePorts;
   return pass;
 }

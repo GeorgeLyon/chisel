@@ -210,7 +210,7 @@ class BuildOpGroups : public calyx::FuncOpPartialLoweringPattern {
                              AddIOp, SubIOp, CmpIOp, ShLIOp, ShRUIOp, ShRSIOp,
                              AndIOp, XOrIOp, OrIOp, ExtUIOp, ExtSIOp, TruncIOp,
                              MulIOp, DivUIOp, DivSIOp, RemUIOp, RemSIOp,
-                             IndexCastOp>(
+                             SelectOp, IndexCastOp>(
                   [&](auto op) { return buildOp(rewriter, op).succeeded(); })
               .template Case<FuncOp, scf::ConditionOp>([&](auto) {
                 /// Skip: these special cases will be handled separately.
@@ -235,6 +235,7 @@ private:
                         BranchOpInterface brOp) const;
   LogicalResult buildOp(PatternRewriter &rewriter,
                         arith::ConstantOp constOp) const;
+  LogicalResult buildOp(PatternRewriter &rewriter, SelectOp op) const;
   LogicalResult buildOp(PatternRewriter &rewriter, AddIOp op) const;
   LogicalResult buildOp(PatternRewriter &rewriter, SubIOp op) const;
   LogicalResult buildOp(PatternRewriter &rewriter, MulIOp op) const;
@@ -672,8 +673,13 @@ LogicalResult BuildOpGroups::buildOp(PatternRewriter &rewriter,
            << "Currently do not support non-empty yield operations inside for "
               "loops. Run --scf-for-to-while before running --scf-to-calyx.";
   }
+
   auto whileOp = dyn_cast<scf::WhileOp>(yieldOp->getParentOp());
-  assert(whileOp);
+  if (!whileOp) {
+    return yieldOp.getOperation()->emitError()
+           << "Currently only support yield operations inside for and while "
+              "loops.";
+  }
   ScfWhileOp whileOpInterface(whileOp);
 
   auto assignGroup =
@@ -787,6 +793,10 @@ LogicalResult BuildOpGroups::buildOp(PatternRewriter &rewriter,
 LogicalResult BuildOpGroups::buildOp(PatternRewriter &rewriter,
                                      XOrIOp op) const {
   return buildLibraryOp<calyx::CombGroupOp, calyx::XorLibOp>(rewriter, op);
+}
+LogicalResult BuildOpGroups::buildOp(PatternRewriter &rewriter,
+                                     SelectOp op) const {
+  return buildLibraryOp<calyx::CombGroupOp, calyx::MuxLibOp>(rewriter, op);
 }
 
 LogicalResult BuildOpGroups::buildOp(PatternRewriter &rewriter,
@@ -1557,10 +1567,11 @@ public:
     // Only accept std operations which we've added lowerings for
     target.addIllegalDialect<FuncDialect>();
     target.addIllegalDialect<ArithDialect>();
-    target.addLegalOp<AddIOp, SubIOp, CmpIOp, ShLIOp, ShRUIOp, ShRSIOp, AndIOp,
-                      XOrIOp, OrIOp, ExtUIOp, TruncIOp, CondBranchOp, BranchOp,
-                      MulIOp, DivUIOp, DivSIOp, RemUIOp, RemSIOp, ReturnOp,
-                      arith::ConstantOp, IndexCastOp, FuncOp, ExtSIOp>();
+    target.addLegalOp<AddIOp, SelectOp, SubIOp, CmpIOp, ShLIOp, ShRUIOp,
+                      ShRSIOp, AndIOp, XOrIOp, OrIOp, ExtUIOp, TruncIOp,
+                      CondBranchOp, BranchOp, MulIOp, DivUIOp, DivSIOp, RemUIOp,
+                      RemSIOp, ReturnOp, arith::ConstantOp, IndexCastOp, FuncOp,
+                      ExtSIOp>();
 
     RewritePatternSet legalizePatterns(&getContext());
     legalizePatterns.add<DummyPattern>(&getContext());

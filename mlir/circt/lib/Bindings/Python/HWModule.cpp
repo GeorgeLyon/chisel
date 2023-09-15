@@ -51,6 +51,44 @@ void circt::python::populateDialectHWSubmodule(py::module &m) {
       .def_property_readonly(
           "size", [](MlirType self) { return hwArrayTypeGetSize(self); });
 
+  py::enum_<HWModulePortDirection>(m, "ModulePortDirection")
+      .value("INPUT", HWModulePortDirection::Input)
+      .value("OUTPUT", HWModulePortDirection::Output)
+      .value("INOUT", HWModulePortDirection::InOut)
+      .export_values();
+
+  py::class_<HWModulePort>(m, "ModulePort")
+      .def(py::init<MlirAttribute, MlirType, HWModulePortDirection>());
+
+  mlir_type_subclass(m, "ModuleType", hwTypeIsAModuleType)
+      .def_classmethod(
+          "get",
+          [](py::object cls, py::list pyModulePorts, MlirContext ctx) {
+            std::vector<HWModulePort> modulePorts;
+            for (auto pyModulePort : pyModulePorts)
+              modulePorts.push_back(pyModulePort.cast<HWModulePort>());
+
+            return cls(
+                hwModuleTypeGet(ctx, modulePorts.size(), modulePorts.data()));
+          },
+          py::arg("cls"), py::arg("ports"), py::arg("context") = py::none())
+      .def_property_readonly(
+          "input_types",
+          [](MlirType self) {
+            py::list inputTypes;
+            intptr_t numInputs = hwModuleTypeGetNumInputs(self);
+            for (intptr_t i = 0; i < numInputs; ++i)
+              inputTypes.append(hwModuleTypeGetInputType(self, i));
+            return inputTypes;
+          })
+      .def_property_readonly("output_types", [](MlirType self) {
+        py::list outputTypes;
+        intptr_t numOutputs = hwModuleTypeGetNumOutputs(self);
+        for (intptr_t i = 0; i < numOutputs; ++i)
+          outputTypes.append(hwModuleTypeGetOutputType(self, i));
+        return outputTypes;
+      });
+
   mlir_type_subclass(m, "ParamIntType", hwTypeIsAIntType)
       .def_classmethod(
           "get_from_param",
@@ -170,6 +208,15 @@ void circt::python::populateDialectHWSubmodule(py::module &m) {
   mlir_attribute_subclass(m, "ParamVerbatimAttr", hwAttrIsAParamVerbatimAttr)
       .def_classmethod("get", [](py::object cls, MlirAttribute text) {
         return cls(hwParamVerbatimAttrGet(text));
+      });
+
+  mlir_attribute_subclass(m, "OutputFileAttr", hwAttrIsAOutputFileAttr)
+      .def_classmethod("get_from_filename", [](py::object cls,
+                                               MlirAttribute fileName,
+                                               bool excludeFromFileList,
+                                               bool includeReplicatedOp) {
+        return cls(hwOutputFileGetFromFileName(fileName, excludeFromFileList,
+                                               includeReplicatedOp));
       });
 
   mlir_attribute_subclass(m, "InnerSymAttr", hwAttrIsAInnerSymAttr)

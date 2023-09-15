@@ -36,9 +36,9 @@
 #include "circt/Support/PrettyPrinterHelpers.h"
 #include "circt/Support/Version.h"
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/FunctionImplementation.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
 #include "mlir/IR/Threading.h"
+#include "mlir/Interfaces/FunctionImplementation.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
 #include "llvm/ADT/MapVector.h"
@@ -226,34 +226,15 @@ static StringRef getPortVerilogName(Operation *module, PortInfo port) {
 static StringRef getPortVerilogName(Operation *module, size_t portArgNum) {
   if (auto htmo = dyn_cast<HWTestModuleOp>(module))
     return getPortVerilogName(module, htmo.getPortList().at(portArgNum));
-  auto numInputs = hw::getModuleNumInputs(module);
   // portArgNum is the index into the result of getAllModulePortInfos.
   // Also ensure the correct index into the input/output list is computed.
-  ssize_t portId = portArgNum;
   char verilogNameAttr[] = "hw.verilogName";
-  // Check for input ports.
-  if (portArgNum < numInputs) {
-    if (auto argAttr =
-            cast<mlir::FunctionOpInterface>(module).getArgAttrsAttr())
-      if (auto argDict = argAttr[portArgNum].cast<DictionaryAttr>())
-        if (auto updatedName = argDict.get(verilogNameAttr))
-          return updatedName.cast<StringAttr>().getValue();
-    // Get the original name of input port if no renaming.
-    return module->getAttrOfType<ArrayAttr>("argNames")[portArgNum]
-        .cast<StringAttr>()
-        .getValue();
-  }
-
-  // If its an output port, get the index into the output port array.
-  portId = portArgNum - numInputs;
-  if (auto argAttr = cast<mlir::FunctionOpInterface>(module).getResAttrsAttr())
-    if (auto argDict = argAttr[portId].cast<DictionaryAttr>())
-      if (auto updatedName = argDict.get(verilogNameAttr))
-        return updatedName.cast<StringAttr>().getValue();
-  // Get the original name of output port if no renaming.
-  return module->getAttrOfType<ArrayAttr>("resultNames")[portId]
-      .cast<StringAttr>()
-      .getValue();
+  auto portAttr = cast<HWModuleLike>(module).getAllPortAttrs();
+  if (auto portDict = cast_or_null<DictionaryAttr>(portAttr[portArgNum]))
+    if (auto updatedName = portDict.get(verilogNameAttr))
+      return updatedName.cast<StringAttr>().getValue();
+  // Get the original name of input port if no renaming.
+  return cast<HWModuleLike>(module).getPortName(portArgNum);
 }
 
 /// This predicate returns true if the specified operation is considered a
@@ -283,7 +264,7 @@ static void getTypeDims(SmallVectorImpl<Attribute> &dims, Type type,
     return;
   }
   if (auto array = hw::type_dyn_cast<ArrayType>(type)) {
-    dims.push_back(getInt32Attr(type.getContext(), array.getSize()));
+    dims.push_back(getInt32Attr(type.getContext(), array.getNumElements()));
     getTypeDims(dims, array.getElementType(), loc);
 
     return;
@@ -323,9 +304,10 @@ bool ExportVerilog::isZeroBitType(Type type) {
   if (auto inout = type.dyn_cast<hw::InOutType>())
     return isZeroBitType(inout.getElementType());
   if (auto uarray = type.dyn_cast<hw::UnpackedArrayType>())
-    return uarray.getSize() == 0 || isZeroBitType(uarray.getElementType());
+    return uarray.getNumElements() == 0 ||
+           isZeroBitType(uarray.getElementType());
   if (auto array = type.dyn_cast<hw::ArrayType>())
-    return array.getSize() == 0 || isZeroBitType(array.getElementType());
+    return array.getNumElements() == 0 || isZeroBitType(array.getElementType());
   if (auto structType = type.dyn_cast<hw::StructType>())
     return llvm::all_of(structType.getElements(),
                         [](auto elem) { return isZeroBitType(elem.type); });
@@ -1239,7 +1221,8 @@ class ModuleEmitter : public EmitterBase {
 public:
   explicit ModuleEmitter(VerilogEmitterState &state)
       : EmitterBase(state),
-        fieldNameResolver(FieldNameResolver(state.globalNames)) {}
+        fieldNameResolver(FieldNameResolver(state.globalNames, state.options)) {
+  }
   ~ModuleEmitter() {
     emitPendingNewlineIfNeeded();
     ps.eof();
@@ -1556,7 +1539,7 @@ void ModuleEmitter::printUnpackedTypePostfix(Type type, raw_ostream &os) {
         printUnpackedTypePostfix(inoutType.getElementType(), os);
       })
       .Case<UnpackedArrayType>([&](UnpackedArrayType arrayType) {
-        os << "[0:" << (arrayType.getSize() - 1) << "]";
+        os << "[0:" << (arrayType.getNumElements() - 1) << "]";
         printUnpackedTypePostfix(arrayType.getElementType(), os);
       })
       .Case<InterfaceType>([&](auto) {
@@ -2658,7 +2641,7 @@ SubExprInfo ExprEmitter::visitTypeOp(ArraySliceOp op) {
 
   auto arrayPrec = emitSubExpr(op.getInput(), Selection);
 
-  unsigned dstWidth = type_cast<ArrayType>(op.getType()).getSize();
+  unsigned dstWidth = type_cast<ArrayType>(op.getType()).getNumElements();
   ps << "[";
   emitSubExpr(op.getLowIndex(), LowestPrecedence);
   ps << " +: ";
@@ -3355,8 +3338,8 @@ class StmtEmitter : public EmitterBase,
 public:
   /// Create an ExprEmitter for the specified module emitter, and keeping track
   /// of any emitted expressions in the specified set.
-  StmtEmitter(ModuleEmitter &emitter)
-      : EmitterBase(emitter.state), emitter(emitter) {}
+  StmtEmitter(ModuleEmitter &emitter, const LoweringOptions &options)
+      : EmitterBase(emitter.state), emitter(emitter), options(options) {}
 
   void emitStatement(Operation *op);
   void emitStatementBlock(Block &body);
@@ -3488,6 +3471,8 @@ private:
   /// current statement scope.
   size_t maxDeclNameWidth = 0;
   size_t maxTypeWidth = 0;
+
+  const LoweringOptions &options;
 };
 
 } // end anonymous namespace
@@ -4007,7 +3992,8 @@ LogicalResult StmtEmitter::visitSV(GenerateCaseOp op) {
         });
 
       StringRef legalName =
-          legalizeName(caseNames[i].cast<StringAttr>().getValue(), nextGenIds);
+          legalizeName(caseNames[i].cast<StringAttr>().getValue(), nextGenIds,
+                       options.caseInsensitiveKeywords);
       ps << ": begin: " << PPExtString(legalName);
       setPendingNewline();
       emitStatementBlock(region.getBlocks().front());
@@ -4615,7 +4601,6 @@ LogicalResult StmtEmitter::visitStmt(InstanceOp op) {
 
   ps << PP::nbsp << PPExtString(getSymOpName(op)) << " (";
 
-  auto instPortInfo = op.getPortList();
   auto modPortInfo =
       cast<PortList>(op.getReferencedModule(&state.symbolCache)).getPortList();
   // Get the max port name length so we can align the '('.
@@ -4633,11 +4618,15 @@ LogicalResult StmtEmitter::visitStmt(InstanceOp op) {
   bool isFirst = true; // True until we print a port.
   bool isZeroWidth = false;
 
-  for (size_t portNum = 0, portEnd = instPortInfo.size(); portNum < portEnd;
+  auto containingModule = cast<HWModuleOp>(emitter.currentModuleOp);
+  auto containingPortList = containingModule.getPortList();
+  SmallVector<Value> instPortValues(modPortInfo.size());
+  op.getValues(instPortValues, modPortInfo);
+  for (size_t portNum = 0, portEnd = modPortInfo.size(); portNum < portEnd;
        ++portNum) {
     auto &modPort = modPortInfo.at(portNum);
     isZeroWidth = isZeroBitType(modPort.type);
-    Value portVal = op.getValue(portNum);
+    Value portVal = instPortValues[portNum];
 
     // Decide if we should print a comma.  We can't do this if we're the first
     // port or if all the subsequent ports are zero width.
@@ -4645,7 +4634,7 @@ LogicalResult StmtEmitter::visitStmt(InstanceOp op) {
       bool shouldPrintComma = true;
       if (isZeroWidth) {
         shouldPrintComma = false;
-        for (size_t i = portNum + 1, e = instPortInfo.size(); i != e; ++i)
+        for (size_t i = portNum + 1, e = modPortInfo.size(); i != e; ++i)
           if (!isZeroBitType(modPortInfo.at(i).type)) {
             shouldPrintComma = true;
             break;
@@ -4698,9 +4687,8 @@ LogicalResult StmtEmitter::visitStmt(InstanceOp op) {
           // Keep this synchronized with countStatements() and
           // visitStmt(OutputOp).
           size_t outputPortNo = portVal.getUses().begin()->getOperandNumber();
-          auto containingModule = cast<HWModuleOp>(emitter.currentModuleOp);
           ps << PPExtString(getPortVerilogName(
-              containingModule, containingModule.getOutputPort(outputPortNo)));
+              containingModule, containingPortList.atOutput(outputPortNo)));
         } else {
           portVal = getWireForValue(portVal);
           emitExpression(portVal, ops);
@@ -5031,6 +5019,14 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
       });
     }
 
+    if (auto regOp = dyn_cast<RegOp>(op)) {
+      if (auto initValue = regOp.getInit()) {
+        ps << PP::space << "=" << PP::space;
+        ps.scopedBox(PP::ibox0,
+                     [&]() { emitExpression(initValue, opsForLocation); });
+      }
+    }
+
     // Try inlining an assignment into declarations.
     if (isa<sv::WireOp, LogicOp>(op) &&
         !op->getParentOp()->hasTrait<ProceduralRegion>()) {
@@ -5119,7 +5115,7 @@ void StmtEmitter::emitStatementBlock(Block &body) {
 // NOLINTEND(misc-no-recursion)
 
 void ModuleEmitter::emitStatement(Operation *op) {
-  StmtEmitter(*this).emitStatement(op);
+  StmtEmitter(*this, state.options).emitStatement(op);
 }
 
 /// Emit SystemVerilog attributes attached to the expression op as dialect
@@ -5167,6 +5163,7 @@ void ModuleEmitter::emitBind(BindOp op) {
   InstanceOp inst = op.getReferencedInstance(&state.symbolCache);
 
   HWModuleOp parentMod = inst->getParentOfType<hw::HWModuleOp>();
+  auto parentPortList = parentMod.getPortList();
   auto parentVerilogName = getVerilogModuleNameAttr(parentMod);
 
   Operation *childMod = inst.getReferencedModule(&state.symbolCache);
@@ -5189,10 +5186,12 @@ void ModuleEmitter::emitBind(BindOp op) {
       maxNameLength = std::max(maxNameLength, elt.getName().size());
     }
 
+    SmallVector<Value> instPortValues(childPortInfo.size());
+    inst.getValues(instPortValues, childPortInfo);
     // Emit the argument and result ports.
     for (auto [idx, elt] : llvm::enumerate(childPortInfo)) {
       // Figure out which value we are emitting.
-      Value portVal = inst.getValue(idx);
+      Value portVal = instPortValues[idx];
       bool isZeroWidth = isZeroBitType(elt.type);
 
       // Decide if we should print a comma.  We can't do this if we're the
@@ -5239,7 +5238,7 @@ void ModuleEmitter::emitBind(BindOp op) {
           // module, just specify that directly.
           size_t outputPortNo = portVal.getUses().begin()->getOperandNumber();
           ps << PPExtString(getPortVerilogName(
-              parentMod, parentMod.getOutputPort(outputPortNo)));
+              parentMod, parentPortList.atOutput(outputPortNo)));
         } else {
           portVal = portVal.getUsers().begin()->getOperand(0);
           ExprEmitter(*this, ops).emitExpression(portVal, LowestPrecedence);
@@ -5546,7 +5545,7 @@ void ModuleEmitter::emitHWModule(HWModuleOp module) {
   assert(state.pendingNewline);
 
   // Emit the body of the module.
-  StmtEmitter(*this).emitStatementBlock(*module.getBodyBlock());
+  StmtEmitter(*this, state.options).emitStatementBlock(*module.getBodyBlock());
   startStatement();
   ps << "endmodule" << PP::newline;
   setPendingNewline();
@@ -5570,7 +5569,7 @@ void ModuleEmitter::emitHWTestModule(HWTestModuleOp module) {
   assert(state.pendingNewline);
 
   // Emit the body of the module.
-  StmtEmitter(*this).emitStatementBlock(*module.getBodyBlock());
+  StmtEmitter(*this, state.options).emitStatementBlock(*module.getBodyBlock());
   startStatement();
   ps << "endmodule" << PP::newline;
   setPendingNewline();

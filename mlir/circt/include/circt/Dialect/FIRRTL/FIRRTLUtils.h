@@ -84,8 +84,9 @@ bool walkDrivers(FIRRTLBaseValue value, bool lookThroughWires,
 
 /// Get the FieldRef from a value.  This will travel backwards to through the
 /// IR, following Subfield and Subindex to find the op which declares the
-/// location.
-FieldRef getFieldRefFromValue(Value value);
+/// location.  Optionally look through recognized cast operations, which
+/// likely will result in source having slightly different type.
+FieldRef getFieldRefFromValue(Value value, bool lookThroughCasts = false);
 
 /// Get a string identifier representing the FieldRef.  Return this string and a
 /// boolean indicating if a valid "root" for the identifier was found.  If
@@ -109,9 +110,23 @@ Value getValueByFieldID(ImplicitLocOpBuilder builder, Value value,
 /// leaf ground type.
 void walkGroundTypes(FIRRTLType firrtlType,
                      llvm::function_ref<void(uint64_t, FIRRTLBaseType)> fn);
+
 //===----------------------------------------------------------------------===//
 // Inner symbol and InnerRef helpers.
 //===----------------------------------------------------------------------===//
+
+/// Ensure that the the InnerSymAttr has a symbol on the field specified.
+/// Returns the updated InnerSymAttr as well as the name of the symbol attached
+/// to the specified field.
+std::pair<hw::InnerSymAttr, StringAttr>
+getOrAddInnerSym(MLIRContext *context, hw::InnerSymAttr attr, uint64_t fieldID,
+                 llvm::function_ref<hw::InnerSymbolNamespace &()> getNamespace);
+
+/// Returns an inner symbol identifier for the specified target (op or port),
+/// adding one if necessary.
+StringAttr
+getOrAddInnerSym(const hw::InnerSymTarget &target,
+                 llvm::function_ref<hw::InnerSymbolNamespace &()> getNamespace);
 
 using GetNamespaceCallback =
     llvm::function_ref<hw::InnerSymbolNamespace &(FModuleLike mod)>;

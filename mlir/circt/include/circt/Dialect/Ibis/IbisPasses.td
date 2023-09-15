@@ -27,4 +27,110 @@ def IbisContainerize : Pass<"ibis-containerize", "ModuleOp"> {
   let constructor = "circt::ibis::createContainerizePass()";
 }
 
+def IbisTunneling : Pass<"ibis-tunneling", "mlir::ModuleOp"> {
+  let summary = "Ibis tunneling pass";
+  let description = [{
+    Tunnels relative `get_port` ops through the module hierarchy, based on
+    `ibis.path` ops. The result of this pass is that various new in- and output
+    ports of `!ibis.portref<...>` type are created.
+    After this pass, `get_port` ops should only exist at the same scope of
+    container instantiations.
+  }];
+  let constructor = "circt::ibis::createTunnelingPass()";
+}
+
+def IbisPortrefLowering : Pass<"ibis-lower-portrefs", "mlir::ModuleOp"> {
+  let summary = "Ibis portref lowering pass";
+  let description = [{
+    Lower `ibis.portref<portref <T>>` to T (i.e. portref resolution).
+
+    We do this by analyzing how a portref is used
+    inside a container, and then creating an in- or output port based on that.
+    That is:
+    - write to `portref<in portref<in, T>>` becomes `out T`
+        i.e this container wants to write to an input of another container, hence
+        it will produce an output value that will drive that input port.
+    - read from `portref<in portref<out, T>>` becomes `in T`
+        i.e. this container wants to read from an output of another container,
+        hence it will have an input port that will be driven by that output port.
+    - write to `portref<out portref<out, T>>` becomes `out T`
+        i.e. a port reference inside the module will be driven by a value from
+        the outside.
+    - read from `portref<out portref<in, T>>` becomes `in T`
+        i.e. a port reference inside the module will be driven by a value from
+        the outside.
+
+    A benefit of having portref lowering separate from portref tunneling is that
+    portref lowering can be done on an `ibis.container` granularity, allowing
+    for a bit of parallelism in the flow.
+  }];
+  let constructor = "circt::ibis::createPortrefLoweringPass()";
+}
+
+def IbisCleanSelfdrivers : Pass<"ibis-clean-selfdrivers", "ibis::ContainerOp"> {
+  let summary = "Ibis clean selfdrivers pass";
+  let description = [{
+    Removes `ibis.port.input`s which are driven by operations within the same
+    container.
+  }];
+
+  let constructor = "circt::ibis::createCleanSelfdriversPass()";
+}
+
+def IbisContainersToHW : Pass<"ibis-convert-containers-to-hw", "mlir::ModuleOp"> {
+  let summary = "Ibis containers to hw conversion pass";
+  let description = [{
+    Converts `ibis.container` ops to `hw.module` ops.
+  }];
+  let constructor = "circt::ibis::createContainersToHWPass()";
+  let dependentDialects = ["circt::hw::HWDialect"];
+}
+
+def IbisArgifyBlocks : Pass<"ibis-argify-blocks"> {
+  let summary = "Add arguments to ibis blocks";
+  let description = [{
+    Analyses `ibis.sblock` operations and converts any SSA value defined outside
+    the `ibis.sblock` to a block argument.
+  }];
+  let constructor = "circt::ibis::createArgifyBlocksPass()";
+}
+
+def IbisReblock : Pass<"ibis-reblock", "ibis::MethodOp"> {
+  let summary = "Recreates `ibis.sblock` operations from a CFG";
+  let description = [{
+    Recreates `ibis.sblock` operations from a CFG. Any `ibis.block.attributes`
+    operations at the parent operation will be added to the resulting blocks.
+
+    The IR is expected to be in maximal SSA form prior to this pass, given that
+    the pass will only inspect the terminator operation of a block for any
+    values that are generated within the block. Maximum SSA form thus ensures
+    that any value defined within the block is never used outside of the block.
+
+    It is expected that `ibis.call` operations have been isolated into
+    their own basic blocks before this pass is run. This implies that all
+    operations within a block (except for the terminator operation) can be
+    statically scheduled with each other.
+
+    e.g.
+    ```mlir
+    ^bb_foo(%arg0 : i32, %arg1 : i32):
+      %res = arith.addi %arg0, %arg1 : i32
+      %v = ...
+      cf.br ^bb_bar(%v : i32)
+    ```
+
+    becomes
+    ```mlir
+    ^bb_foo(%arg0 : i32, %arg1 : i32):
+      %v_outer = ibis.sblock(%a0 : i32 = %arg0, %a1 : i32 = %arg1) -> (i32) {
+        %res = arith.addi %arg0, %arg1 : i32
+        %v = ...
+        ibis.sblock.return %v : i32
+      }
+      cf.br ^bb_bar(%v_outer : i32)
+    ```
+  }];
+  let constructor = "circt::ibis::createReblockPass()";
+}
+
 #endif // CIRCT_DIALECT_IBIS_PASSES_TD

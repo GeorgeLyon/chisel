@@ -25,6 +25,8 @@ class Pass;
 namespace circt {
 namespace firrtl {
 
+std::unique_ptr<mlir::Pass> createResolvePathsPass();
+
 std::unique_ptr<mlir::Pass>
 createLowerFIRRTLAnnotationsPass(bool ignoreUnhandledAnnotations = false,
                                  bool ignoreClasslessAnnotations = false,
@@ -161,7 +163,7 @@ std::unique_ptr<mlir::Pass> createInnerSymbolDCEPass();
 
 std::unique_ptr<mlir::Pass> createFinalizeIRPass();
 
-std::unique_ptr<mlir::Pass> createExtractClassesPass();
+std::unique_ptr<mlir::Pass> createLowerClassesPass();
 
 std::unique_ptr<mlir::Pass> createLowerGroupsPass();
 

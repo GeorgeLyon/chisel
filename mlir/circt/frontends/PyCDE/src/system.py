@@ -107,7 +107,7 @@ class System:
   def set_debug():
     ir._GlobalDebug.flag = True
 
-  # TODO: Ideally, we'd be able to run the std-to-handshake lowering passes in
+  # TODO: Ideally, we'd be able to run the cf-to-handshake lowering passes in
   # pycde.  As of now, however, the cf/memref/arith dialects are not registered
   # so the assembly can't be loaded. The right way to do this is to have pycde
   # load those dialects, though there isn't a python hook to selectively load
@@ -118,7 +118,7 @@ class System:
   #     "flatten-memref",
   #     "flatten-memref-calls",
   #     "func.func(handshake-legalize-memrefs)",
-  #     "lower-std-to-handshake",
+  #     "lower-cf-to-handshake",
   #     "canonicalize",
   #     "handshake-lower-extmem-to-hw{wrap-esi}",
   #     "canonicalize",
@@ -255,7 +255,6 @@ class System:
       # "builtin.module(esi-emit-cpp-api{{output-file=ESISystem.h}})",
       "builtin.module(esi-emit-collateral{{tops={tops} schema-file=schema.capnp}})",
       "builtin.module(esi-clean-metadata)",
-      "builtin.module(lower-msft-to-hw{{verilog-file={verilog_file}}})",
       "builtin.module(hw.module(lower-seq-hlmem))",
       "builtin.module(lower-esi-to-physical, lower-esi-ports, lower-esi-to-hw)",
       "builtin.module(convert-fsm-to-sv)",
@@ -545,7 +544,7 @@ class _OpCache:
     if module is None:
       return {}
     circt_mod = self.get_circt_mod(module)
-    if isinstance(circt_mod, msft.MSFTModuleExternOp):
+    if isinstance(circt_mod, hw.HWModuleExternOp):
       return {}
 
     if circt_mod not in self._module_inside_sym_cache:

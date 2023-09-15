@@ -11,7 +11,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "circt/Dialect/FIRRTL/FIRRTLUtils.h"
+#include "circt/Dialect/HW/HWOps.h"
 #include "circt/Dialect/HW/InnerSymbolNamespace.h"
+#include "circt/Dialect/Seq/SeqTypes.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
 #include "llvm/ADT/TypeSwitch.h"
 
@@ -96,7 +98,7 @@ void circt::firrtl::emitConnect(ImplicitLocOpBuilder &builder, Value dst,
     src = builder.create<UninferredResetCastOp>(srcType, src);
   }
 
-  // Handle ground types with possibly uninferred widths.
+  // Handle passive types with possibly uninferred widths.
   auto dstWidth = dstType.getBitWidthOrSentinel();
   auto srcWidth = srcType.getBitWidthOrSentinel();
   if (dstWidth < 0 || srcWidth < 0) {
@@ -106,7 +108,6 @@ void circt::firrtl::emitConnect(ImplicitLocOpBuilder &builder, Value dst,
     // Const-cast as needed, using widthless version of dest.
     // (dest is either widthless already, or source is and if the types
     //  can be const-cast'd, do so)
-    assert(srcType.isGround() && dstType.isGround());
     if (dstType != srcType && dstType.getWidthlessType() != srcType &&
         areTypesConstCastable(dstType.getWidthlessType(), srcType)) {
       src = builder.create<ConstCastOp>(dstType.getWidthlessType(), src);
@@ -472,7 +473,8 @@ bool circt::firrtl::walkDrivers(FIRRTLBaseValue value, bool lookThroughWires,
 // FieldRef helpers
 //===----------------------------------------------------------------------===//
 
-FieldRef circt::firrtl::getFieldRefFromValue(Value value) {
+FieldRef circt::firrtl::getFieldRefFromValue(Value value,
+                                             bool lookThroughCasts) {
   // This code walks upwards from the subfield and calculates the field ID at
   // each level. At each stage, it must take the current id, and re-index it as
   // a nested bundle under the parent field.. This is accomplished by using the
@@ -487,6 +489,12 @@ FieldRef circt::firrtl::getFieldRefFromValue(Value value) {
 
     auto handled =
         TypeSwitch<Operation *, bool>(op)
+            .Case<RefCastOp, ConstCastOp, UninferredResetCastOp>([&](auto op) {
+              if (!lookThroughCasts)
+                return false;
+              value = op.getInput();
+              return true;
+            })
             .Case<SubfieldOp, OpenSubfieldOp>([&](auto subfieldOp) {
               value = subfieldOp.getInput();
               typename decltype(subfieldOp)::InputType bundleType =
@@ -707,52 +715,48 @@ void circt::firrtl::walkGroundTypes(
   recurse(recurse, type);
 }
 
-/// Returns an operation's `inner_sym`, adding one if necessary.
-StringAttr circt::firrtl::getOrAddInnerSym(const hw::InnerSymTarget &target,
-                                           GetNamespaceCallback getNamespace) {
+// Return InnerSymAttr with sym on specified fieldID.
+std::pair<hw::InnerSymAttr, StringAttr> circt::firrtl::getOrAddInnerSym(
+    MLIRContext *context, hw::InnerSymAttr attr, uint64_t fieldID,
+    llvm::function_ref<hw::InnerSymbolNamespace &()> getNamespace) {
+  SmallVector<hw::InnerSymPropertiesAttr> props;
+  if (attr) {
+    // If already present, return it.
+    if (auto sym = attr.getSymIfExists(fieldID))
+      return {attr, sym};
+    llvm::append_range(props, attr.getProps());
+  }
 
-  // Return InnerSymAttr with sym on specified fieldID.
-  auto getOrAdd = [&](auto mod, hw::InnerSymAttr attr,
-                      auto fieldID) -> std::pair<hw::InnerSymAttr, StringAttr> {
-    assert(mod);
-    auto *context = mod.getContext();
+  // Otherwise, create symbol and add to list.
+  auto sym = StringAttr::get(context, getNamespace().newName("sym"));
+  props.push_back(hw::InnerSymPropertiesAttr::get(
+      context, sym, fieldID, StringAttr::get(context, "public")));
+  // TODO: store/ensure always sorted, insert directly, faster search.
+  // For now, just be good and sort by fieldID.
+  llvm::sort(props,
+             [](auto &p, auto &q) { return p.getFieldID() < q.getFieldID(); });
+  return {hw::InnerSymAttr::get(context, props), sym};
+}
 
-    SmallVector<hw::InnerSymPropertiesAttr> props;
-    if (attr) {
-      // If already present, return it.
-      if (auto sym = attr.getSymIfExists(fieldID))
-        return {attr, sym};
-      llvm::append_range(props, attr.getProps());
-    }
-
-    // Otherwise, create symbol and add to list.
-    auto sym = StringAttr::get(context, getNamespace(mod).newName("sym"));
-    props.push_back(hw::InnerSymPropertiesAttr::get(
-        context, sym, fieldID, StringAttr::get(context, "public")));
-    // TODO: store/ensure always sorted, insert directly, faster search.
-    // For now, just be good and sort by fieldID.
-    llvm::sort(props, [](auto &p, auto &q) {
-      return p.getFieldID() < q.getFieldID();
-    });
-    return {hw::InnerSymAttr::get(context, props), sym};
-  };
-
+StringAttr circt::firrtl::getOrAddInnerSym(
+    const hw::InnerSymTarget &target,
+    llvm::function_ref<hw::InnerSymbolNamespace &()> getNamespace) {
   if (target.isPort()) {
     if (auto mod = dyn_cast<FModuleOp>(target.getOp())) {
       auto portIdx = target.getPort();
       assert(portIdx < mod.getNumPorts());
       auto [attr, sym] =
-          getOrAdd(mod, mod.getPortSymbolAttr(portIdx), target.getField());
+          getOrAddInnerSym(mod.getContext(), mod.getPortSymbolAttr(portIdx),
+                           target.getField(), getNamespace);
       mod.setPortSymbolsAttr(portIdx, attr);
       return sym;
     }
   } else {
     // InnerSymbols only supported if op implements the interface.
     if (auto symOp = dyn_cast<hw::InnerSymbolOpInterface>(target.getOp())) {
-      auto mod = symOp->getParentOfType<FModuleOp>();
-      assert(mod);
       auto [attr, sym] =
-          getOrAdd(mod, symOp.getInnerSymAttr(), target.getField());
+          getOrAddInnerSym(symOp.getContext(), symOp.getInnerSymAttr(),
+                           target.getField(), getNamespace);
       symOp.setInnerSymbolAttr(attr);
       return sym;
     }
@@ -760,6 +764,20 @@ StringAttr circt::firrtl::getOrAddInnerSym(const hw::InnerSymTarget &target,
 
   assert(0 && "target must be port of FModuleOp or InnerSymbol");
   return {};
+}
+
+StringAttr circt::firrtl::getOrAddInnerSym(const hw::InnerSymTarget &target,
+                                           GetNamespaceCallback getNamespace) {
+  FModuleLike module;
+  if (target.isPort())
+    module = cast<FModuleLike>(target.getOp());
+  else
+    module = target.getOp()->getParentOfType<FModuleOp>();
+  assert(module);
+
+  return getOrAddInnerSym(target, [&]() -> hw::InnerSymbolNamespace & {
+    return getNamespace(module);
+  });
 }
 
 /// Obtain an inner reference to an operation, possibly adding an `inner_sym`
@@ -959,6 +977,8 @@ Type circt::firrtl::lowerType(
         {StringAttr::get(type.getContext(), "body"), bodyTy}};
     return hw::StructType::get(type.getContext(), fields);
   }
+  if (type_isa<ClockType>(firType))
+    return seq::ClockType::get(firType.getContext());
 
   auto width = firType.getBitWidthOrSentinel();
   if (width >= 0) // IntType, analog with known width, clock, etc.

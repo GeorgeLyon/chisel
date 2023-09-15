@@ -128,11 +128,11 @@ private:
     return TypeSwitch<Operation *, FailureOr<StringRef>>(op)
         .Case<MemoryOp, RegisterOp, NotLibOp, AndLibOp, OrLibOp, XorLibOp,
               AddLibOp, SubLibOp, GtLibOp, LtLibOp, EqLibOp, NeqLibOp, GeLibOp,
-              LeLibOp, LshLibOp, RshLibOp, SliceLibOp, PadLibOp, WireLibOp>(
-            [&](auto op) -> FailureOr<StringRef> {
-              static constexpr std::string_view sCore = "core";
-              return {sCore};
-            })
+              LeLibOp, LshLibOp, RshLibOp, SliceLibOp, PadLibOp, WireLibOp,
+              MuxLibOp>([&](auto op) -> FailureOr<StringRef> {
+          static constexpr std::string_view sCore = "core";
+          return {sCore};
+        })
         .Case<SgtLibOp, SltLibOp, SeqLibOp, SneqLibOp, SgeLibOp, SleLibOp,
               SrshLibOp, MultPipeLibOp, RemUPipeLibOp, RemSPipeLibOp,
               DivUPipeLibOp, DivSPipeLibOp>(
@@ -628,6 +628,8 @@ void Emitter::emitComponent(ComponentInterface op) {
                 SubLibOp, ShruLibOp, RshLibOp, SrshLibOp, LshLibOp, AndLibOp,
                 NotLibOp, OrLibOp, XorLibOp, WireLibOp>(
               [&](auto op) { emitLibraryPrimTypedByFirstInputPort(op); })
+          .Case<MuxLibOp>(
+              [&](auto op) { emitLibraryPrimTypedByFirstOutputPort(op); })
           .Case<MultPipeLibOp>(
               [&](auto op) { emitLibraryPrimTypedByFirstOutputPort(op); })
           .Case<RemUPipeLibOp, DivUPipeLibOp>([&](auto op) {
@@ -700,9 +702,11 @@ void Emitter::emitPrimitivePorts(hw::HWModuleExternOp op) {
   auto emitPorts = [&](auto ports, bool isInput) {
     auto e = static_cast<size_t>(std::distance(ports.begin(), ports.end()));
     os << LParen();
+    auto type = op.getHWModuleType();
     for (auto [i, port] : llvm::enumerate(ports)) {
-      DictionaryAttr portAttr =
-          isInput ? op.getArgAttrDict(i) : op.getResultAttrDict(i);
+      DictionaryAttr portAttr = cast_or_null<DictionaryAttr>(
+          op.getPortAttrs(isInput ? type.getPortIdForInputId(i)
+                                  : type.getPortIdForOutputId(i)));
 
       os << getAttributes(op, portAttr) << port.name.getValue() << colon();
       // We only care about the bit width in the emitted .futil file.

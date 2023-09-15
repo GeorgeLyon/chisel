@@ -13,6 +13,7 @@ def InstanceOp : MSFTOp<"instance", [
         DeclareOpInterfaceMethods<OpAsmOpInterface, ["getAsmResultNames"]>,
         DeclareOpInterfaceMethods<InnerSymbol, ["getTargetResultIndex"]>,
         DeclareOpInterfaceMethods<SymbolUserOpInterface>,
+        DeclareOpInterfaceMethods<PortList>,
         DeclareOpInterfaceMethods<InstanceGraphInstanceOpInterface>
     ]> {
   let summary = "Instantiate a module";
@@ -40,11 +41,6 @@ def InstanceOp : MSFTOp<"instance", [
     // Update the results.
     InstanceOp getWithNewResults(MSFTModuleOp mod,
                                  ArrayRef<unsigned> newToOldMap);
-
-    //===------------------------------------------------------------------===//
-    // PortList Methods
-    //===------------------------------------------------------------------===//
-    ::circt::hw::ModulePortInfo getPortList();
   }];
 
   /// sym keyword for optional symbol simplifies parsing
@@ -62,8 +58,11 @@ def AppIDArrayAttr : TypedArrayAttrBase<AppIDAttr, "Array of AppIDs">;
 
 class MSFTModuleOpBase<string mnemonic, list<Trait> traits = []> :
     MSFTOp<mnemonic, traits # [
-      IsolatedFromAbove, Symbol, FunctionOpInterface, OpAsmOpInterface,
-      HasParent<"mlir::ModuleOp">, DeclareOpInterfaceMethods<HWModuleLike>
+      IsolatedFromAbove, Symbol, OpAsmOpInterface,
+      DeclareOpInterfaceMethods<PortList>,
+      DeclareOpInterfaceMethods<SymboledPortList>,
+      DeclareOpInterfaceMethods<HWModuleLike>,
+      HasParent<"mlir::ModuleOp">,
     ]> {
   /// Additional class declarations inside the module op.
   code extraModuleClassDeclaration = ?;
@@ -110,18 +109,14 @@ class MSFTModuleOpBase<string mnemonic, list<Trait> traits = []> :
           setNameFn(block->getArgument(i), name);
       }
     }
-
-    //===------------------------------------------------------------------===//
-    // PortList Methods
-    //===------------------------------------------------------------------===//
-    ::circt::hw::ModulePortInfo getPortList();
   }];
 }
 
-def MSFTModuleOp : MSFTModuleOpBase<"module",
-      [RegionKindInterface, HasParent<"mlir::ModuleOp">,
-       SingleBlockImplicitTerminator<"OutputOp">,
-       DeclareOpInterfaceMethods<HWMutableModuleLike>]>{
+def MSFTModuleOp : MSFTModuleOpBase<"module", [
+      RegionKindInterface, HasParent<"mlir::ModuleOp">,
+      DeclareOpInterfaceMethods<HWMutableModuleLike>,
+      SingleBlockImplicitTerminator<"OutputOp">
+    ]>{
   let summary = "MSFT HW Module";
   let description = [{
     A lot like `hw.module`, but with a few differences:
@@ -150,9 +145,6 @@ def MSFTModuleOp : MSFTModuleOpBase<"module",
   ];
 
   let extraModuleClassDeclaration = [{
-    using mlir::detail::FunctionOpInterfaceTrait<MSFTModuleOp>::front;
-    using mlir::detail::FunctionOpInterfaceTrait<MSFTModuleOp>::getFunctionBody;
-
     // Implement RegionKindInterface.
     static RegionKind getRegionKind(unsigned index) {
       return RegionKind::Graph;
@@ -175,23 +167,43 @@ def MSFTModuleOp : MSFTModuleOpBase<"module",
     SmallVector<unsigned>
     removePorts(llvm::BitVector inputs, llvm::BitVector outputs);
 
-    Block *getBodyBlock() { return &getFunctionBody().front(); }
+    Block *getBodyBlock() { return &getBody().front(); }
   }];
 
   let extraClassDefinition = [{
-    size_t $cppClass::getNumPorts() {
-      // This is excessively expensive
-      auto ports = getPortList();
-      return ports.size();
+
+    ::circt::hw::ModuleType $cppClass::getHWModuleType() {
+      return ::circt::hw::detail::fnToMod(getFunctionType(), getArgNames().getValue(), getResultNames().getValue());
     }
 
-    circt::hw::InnerSymAttr $cppClass::getPortSymbolAttr(size_t portIndex) {
-      for (NamedAttribute argAttr :
-           mlir::function_interface_impl::getArgAttrs(*this, portIndex))
-        if (auto sym = argAttr.getValue().dyn_cast<circt::hw::InnerSymAttr>())
-          return sym;
-      return circt::hw::InnerSymAttr();
+    ::circt::hw::InnerSymAttr $cppClass::getPortSymbolAttr(size_t portIndex) {
+      return {};
     }
+
+    size_t $cppClass::getNumPorts() {
+      auto fnty = getFunctionType();
+      return fnty.getNumInputs() + fnty.getNumResults();
+    }
+
+    size_t $cppClass::getNumInputPorts() {
+      auto fnty = getFunctionType();
+      return fnty.getNumInputs();
+    }
+
+    size_t $cppClass::getNumOutputPorts() {
+      auto fnty = getFunctionType();
+      return fnty.getNumResults();
+    }
+
+    size_t $cppClass::getPortIdForInputId(size_t idx) {
+      return idx;
+    }
+
+    size_t $cppClass::getPortIdForOutputId(size_t idx) {
+      return idx + getNumInputPorts();
+    }
+
+
   }];
 
   let hasCustomAssemblyFormat = 1;
@@ -199,7 +211,10 @@ def MSFTModuleOp : MSFTModuleOpBase<"module",
 }
 
 def MSFTModuleExternOp : MSFTOp<"module.extern",
-      [Symbol, FunctionOpInterface, HasParent<"mlir::ModuleOp">, DeclareOpInterfaceMethods<HWModuleLike>]> {
+      [Symbol, HasParent<"mlir::ModuleOp">,
+      DeclareOpInterfaceMethods<PortList>,
+      DeclareOpInterfaceMethods<SymboledPortList>,
+      DeclareOpInterfaceMethods<HWModuleLike>]> {
   let summary = "MSFT external Module";
   let description = [{
     Identical to `hw.module.extern`, and trivially lowers to that. This op
@@ -226,16 +241,24 @@ def MSFTModuleExternOp : MSFTOp<"module.extern",
   let hasVerifier = 1;
 
   let extraClassDeclaration = [{
+
+    /// Decode information about the input and output ports on this module.
+    hw::ModulePortInfo getPorts();
+
     /// Returns the argument types of this function.
     ArrayRef<Type> getArgumentTypes() { return getFunctionType().getInputs(); }
 
     /// Returns the result types of this function.
     ArrayRef<Type> getResultTypes() { return getFunctionType().getResults(); }
 
-    //===------------------------------------------------------------------===//
-    // PortList Methods
-    //===------------------------------------------------------------------===//
-    ::circt::hw::ModulePortInfo getPortList();
+    Block *getBodyBlock() { return nullptr; }
+
+  }];
+
+  let extraClassDefinition = [{
+    ::circt::hw::ModuleType $cppClass::getHWModuleType() {
+      return ::circt::hw::detail::fnToMod(getFunctionType(), getArgNames().getValue(), getResultNames().getValue());
+    }
   }];
 }
 

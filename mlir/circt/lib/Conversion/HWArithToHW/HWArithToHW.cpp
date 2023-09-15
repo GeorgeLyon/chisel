@@ -13,12 +13,12 @@
 #include "circt/Conversion/HWArithToHW.h"
 #include "../PassDetail.h"
 #include "circt/Dialect/Comb/CombOps.h"
+#include "circt/Dialect/HW/ConversionPatterns.h"
 #include "circt/Dialect/HW/HWOps.h"
 #include "circt/Dialect/HWArith/HWArithOps.h"
 #include "circt/Dialect/MSFT/MSFTOps.h"
 #include "circt/Dialect/SV/SVOps.h"
 #include "circt/Dialect/Seq/SeqOps.h"
-#include "circt/Support/ConversionPatterns.h"
 
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -135,6 +135,12 @@ static bool isLegalOp(Operation *op) {
     return llvm::none_of(funcOp.getArgumentTypes(), isSignednessType) &&
            llvm::none_of(funcOp.getResultTypes(), isSignednessType) &&
            llvm::none_of(funcOp.getFunctionBody().getArgumentTypes(),
+                         isSignednessType);
+  }
+
+  if (auto modOp = dyn_cast<hw::HWModuleLike>(op)) {
+    return llvm::none_of(modOp.getPortTypes(), isSignednessType) &&
+           llvm::none_of(modOp.getModuleBody().getArgumentTypes(),
                          isSignednessType);
   }
 
@@ -354,7 +360,7 @@ Type HWArithToHWTypeConverter::removeSignedness(Type type) {
           })
           .Case<hw::ArrayType>([this](auto type) {
             return hw::ArrayType::get(removeSignedness(type.getElementType()),
-                                      type.getSize());
+                                      type.getNumElements());
           })
           .Case<hw::StructType>([this](auto type) {
             // Recursively convert each element.

@@ -50,6 +50,7 @@ firrtl.circuit "Simple" {
   firrtl.module private @TestInstance(in %u2: !firrtl.uint<2>, in %s8: !firrtl.sint<8>,
                               in %clock: !firrtl.clock,
                               in %reset: !firrtl.uint<1>) {
+    // CHECK-NEXT: [[CLK:%.+]] = seq.from_clock %clock
     // CHECK-NEXT: %c0_i2 = hw.constant
     // CHECK-NEXT: %xyz.out4 = hw.instance "xyz" @Simple(in1: [[ARG1:%.+]]: i4, in2: %u2: i2, in3: %s8: i8) -> (out4: i4)
     %xyz:4 = firrtl.instance xyz @Simple(in in1: !firrtl.uint<4>, in in2: !firrtl.uint<2>, in in3: !firrtl.sint<8>, out out4: !firrtl.uint<4>)
@@ -124,32 +125,20 @@ firrtl.circuit "Simple" {
     // CHECK: [[OUTE:%.+]] = comb.concat %false, %inE : i1, i3
     // CHECK: hw.output %inA, [[OUTB]], [[OUTC]], [[OUTD]], [[OUTE]]
   }
-  
+
   firrtl.module private @InputPorts(in %in : !firrtl.uint<1>) { }
   firrtl.module private @InputPortsParent(in %in : !firrtl.uint<1>) {
-    // Unconnected.
-    // CHECK: %undriven = sv.wire : !hw.inout<i1>
-    // CHECK: %0 = sv.read_inout %undriven : !hw.inout<i1>
-    // CHECK: hw.instance "ip0" @InputPorts(in: %0: i1) -> ()
-    %ip0_in = firrtl.instance ip0 @InputPorts(in in : !firrtl.uint<1>)
-    
     // Double connected.
     // CHECK: hw.instance "ip1" @InputPorts(in: %in: i1) -> ()
     %ip1_in = firrtl.instance ip1 @InputPorts(in in : !firrtl.uint<1>)
     firrtl.connect %ip1_in, %in : !firrtl.uint<1>, !firrtl.uint<1>
     firrtl.connect %ip1_in, %in : !firrtl.uint<1>, !firrtl.uint<1>
-
-    // Combinational loop.
-    // CHECK: %undriven_0 = sv.wire name "undriven" : !hw.inout<i1>
-    // CHECK: %1 = sv.read_inout %undriven_0 : !hw.inout<i1>
-    // CHECK: hw.instance "ip2" @InputPorts(in: %1: i1) -> ()
-    %ip2_in = firrtl.instance ip2 @InputPorts(in in : !firrtl.uint<1>)
-    firrtl.connect %ip2_in, %ip2_in : !firrtl.uint<1>, !firrtl.uint<1>
   }
 
-  // CHECK-LABEL: hw.module private @Analog(%a1: !hw.inout<i1>) -> (outClock: i1) {
-  // CHECK-NEXT:    %0 = sv.read_inout %a1 : !hw.inout<i1>
-  // CHECK-NEXT:    hw.output %0 : i1
+  // CHECK-LABEL: hw.module private @Analog(%a1: !hw.inout<i1>) -> (outClock: !seq.clock) {
+  // CHECK-NEXT:    [[READ:%.+]] = sv.read_inout %a1 : !hw.inout<i1>
+  // CHECK-NEXT:    [[CLK:%.+]] = seq.to_clock [[READ]]
+  // CHECK-NEXT:    hw.output [[CLK]] : !seq.clock
   firrtl.module private @Analog(in %a1: !firrtl.analog<1>,
                         out %outClock: !firrtl.clock) {
 
@@ -221,15 +210,14 @@ firrtl.circuit "Simple" {
   firrtl.module private @ZeroWidthInstance(in %iA: !firrtl.uint<4>,
                                    in %iB: !firrtl.uint<0>,
                                    in %iC: !firrtl.analog<0>,
+                                   in %iD: !firrtl.uint<1>,
+                                   in %iE: !firrtl.analog<1>,
                                    out %oA: !firrtl.uint<4>,
                                    out %oB: !firrtl.uint<0>) {
 
     // CHECK: %myinst.outa = hw.instance "myinst" @ZeroWidthPorts(inA: %iA: i4) -> (outa: i4)
     %myinst:5 = firrtl.instance myinst @ZeroWidthPorts(
       in inA: !firrtl.uint<4>, in inB: !firrtl.uint<0>, in inC: !firrtl.analog<0>, out outa: !firrtl.uint<4>, out outb: !firrtl.uint<0>)
-    // CHECK: = hw.instance "myinst" @SameNamePorts(inA: {{.+}}, inA: {{.+}}, inA: {{.+}}) -> (outa: i4, outa: i1)
-    %myinst_sameName:5 = firrtl.instance myinst @SameNamePorts(
-      in inA: !firrtl.uint<4>, in inA: !firrtl.uint<1>, in inA: !firrtl.analog<1>, out outa: !firrtl.uint<4>, out outa: !firrtl.uint<1>)
 
     // Output of the instance is fed into the input!
     firrtl.connect %myinst#0, %iA : !firrtl.uint<4>, !firrtl.uint<4>
@@ -237,6 +225,13 @@ firrtl.circuit "Simple" {
     firrtl.attach %myinst#2, %iC : !firrtl.analog<0>, !firrtl.analog<0>
     firrtl.connect %oA, %myinst#3 : !firrtl.uint<4>, !firrtl.uint<4>
     firrtl.connect %oB, %myinst#4 : !firrtl.uint<0>, !firrtl.uint<0>
+
+    // CHECK: = hw.instance "myinst" @SameNamePorts(inA: {{.+}}, inA: {{.+}}, inA: {{.+}}) -> (outa: i4, outa: i1)
+    %myinst_sameName:5 = firrtl.instance myinst @SameNamePorts(
+      in inA: !firrtl.uint<4>, in inA: !firrtl.uint<1>, in inA: !firrtl.analog<1>, out outa: !firrtl.uint<4>, out outa: !firrtl.uint<1>)
+    firrtl.connect %myinst_sameName#0, %iA : !firrtl.uint<4>, !firrtl.uint<4>
+    firrtl.connect %myinst_sameName#1, %iD : !firrtl.uint<1>, !firrtl.uint<1>
+    firrtl.attach %myinst_sameName#2, %iE : !firrtl.analog<1>, !firrtl.analog<1>
 
     // CHECK: hw.output %myinst.outa
   }
@@ -284,7 +279,7 @@ firrtl.circuit "Simple" {
   // Memory modules are lowered to plain external modules.
   // CHECK: hw.module.extern @MRead_ext(%R0_addr: i4, %R0_en: i1, %R0_clk: i1) -> (R0_data: i42) attributes {verilogName = "MRead_ext"}
   firrtl.memmodule @MRead_ext(in R0_addr: !firrtl.uint<4>, in R0_en: !firrtl.uint<1>, in R0_clk: !firrtl.uint<1>, out R0_data: !firrtl.uint<42>) attributes {dataWidth = 42 : ui32, depth = 12 : ui64, extraPorts = [], maskBits = 0 : ui32, numReadPorts = 1 : ui32, numReadWritePorts = 0 : ui32, numWritePorts = 0 : ui32, readLatency = 0 : ui32, writeLatency = 1 : ui32}
-  
+
   // The following operations should be passed through without an error.
   // CHECK: sv.interface @SVInterface
   sv.interface @SVInterface { }

@@ -194,6 +194,10 @@ class InstanceGraph {
   using NodeList = llvm::iplist<InstanceGraphNode>;
 
 public:
+  /// Create a new module graph of a circuit.  Must be called on the parent
+  /// operation of ModuleOpInterface ops.
+  InstanceGraph(Operation *parent);
+  InstanceGraph(const InstanceGraph &) = delete;
   virtual ~InstanceGraph() = default;
 
   /// Look up an InstanceGraphNode for a module.
@@ -217,7 +221,7 @@ public:
   bool isAncestor(ModuleOpInterface child, ModuleOpInterface parent);
 
   /// Get the node corresponding to the top-level module of a circuit.
-  virtual InstanceGraphNode *getTopLevelNode() = 0;
+  virtual InstanceGraphNode *getTopLevelNode() { return nullptr; }
 
   /// Get the nodes corresponding to the inferred top-level modules of a
   /// circuit.
@@ -258,11 +262,6 @@ public:
                                InstanceOpInterface newInst);
 
 protected:
-  /// Create a new module graph of a circuit.  Must be called on the parent
-  /// operation of ModuleOpInterface ops.
-  InstanceGraph(Operation *parent);
-  InstanceGraph(const InstanceGraph &) = delete;
-
   ModuleOpInterface getReferencedModuleImpl(InstanceOpInterface op);
 
   /// Get the node corresponding to the module.  If the node has does not exist
@@ -282,21 +281,53 @@ protected:
   llvm::SmallVector<InstanceGraphNode *> inferredTopLevelNodes;
 };
 
-/// An absolute instance path.
-using InstancePath = ArrayRef<InstanceOpInterface>;
+struct InstancePathCache;
 
-template <typename T>
-inline static T &formatInstancePath(T &into, const InstancePath &path) {
-  into << "$root";
-  for (auto inst : path)
-    into << "/" << inst.getInstanceName() << ":"
-         << inst.getReferencedModuleName();
-  return into;
-}
+/**
+ * An instance path composed of a series of instances.
+ */
+class InstancePath final {
+public:
+  InstancePath() = default;
+
+  InstanceOpInterface top() const {
+    assert(!empty() && "instance path is empty");
+    return path[0];
+  }
+
+  InstanceOpInterface leaf() const {
+    assert(!empty() && "instance path is empty");
+    return path.back();
+  }
+
+  InstancePath dropFront() const { return InstancePath(path.drop_front()); }
+
+  InstanceOpInterface operator[](size_t idx) const { return path[idx]; }
+  ArrayRef<InstanceOpInterface>::iterator begin() const { return path.begin(); }
+  ArrayRef<InstanceOpInterface>::iterator end() const { return path.end(); }
+  size_t size() const { return path.size(); }
+  bool empty() const { return path.empty(); }
+
+  /// Print the path to any stream-like object.
+  template <typename T>
+  void print(T &into) const {
+    into << "$root";
+    for (auto inst : path)
+      into << "/" << inst.getInstanceName() << ":"
+           << inst.getReferencedModuleName();
+  }
+
+private:
+  // Only the path cache is allowed to create paths.
+  friend struct InstancePathCache;
+  InstancePath(ArrayRef<InstanceOpInterface> path) : path(path) {}
+
+  ArrayRef<InstanceOpInterface> path;
+};
 
 template <typename T>
 static T &operator<<(T &os, const InstancePath &path) {
-  return formatInstancePath(os, path);
+  return path.print(os);
 }
 
 /// A data structure that caches and provides absolute paths to module instances
@@ -312,15 +343,18 @@ struct InstancePathCache {
   /// Replace an InstanceOp. This is required to keep the cache updated.
   void replaceInstance(InstanceOpInterface oldOp, InstanceOpInterface newOp);
 
+  /// Append an instance to a path.
+  InstancePath appendInstance(InstancePath path, InstanceOpInterface inst);
+
+  /// Prepend an instance to a path.
+  InstancePath prependInstance(InstanceOpInterface inst, InstancePath path);
+
 private:
   /// An allocator for individual instance paths and entire path lists.
   llvm::BumpPtrAllocator allocator;
 
   /// Cached absolute instance paths.
   DenseMap<Operation *, ArrayRef<InstancePath>> absolutePathsCache;
-
-  /// Append an instance to a path.
-  InstancePath appendInstance(InstancePath path, InstanceOpInterface inst);
 };
 
 } // namespace igraph

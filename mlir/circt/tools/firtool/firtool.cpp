@@ -22,9 +22,11 @@
 #include "circt/Dialect/FIRRTL/Passes.h"
 #include "circt/Dialect/HW/HWDialect.h"
 #include "circt/Dialect/HW/HWOps.h"
+#include "circt/Dialect/HW/HWPasses.h"
 #include "circt/Dialect/LTL/LTLDialect.h"
 #include "circt/Dialect/OM/OMDialect.h"
 #include "circt/Dialect/OM/OMOps.h"
+#include "circt/Dialect/OM/OMPasses.h"
 #include "circt/Dialect/SV/SVDialect.h"
 #include "circt/Dialect/SV/SVPasses.h"
 #include "circt/Dialect/Seq/SeqDialect.h"
@@ -325,6 +327,8 @@ static LogicalResult processBuffer(
   // Legalize away "open" aggregates to hw-only versions.
   pm.nest<firrtl::CircuitOp>().addPass(firrtl::createLowerOpenAggsPass());
 
+  pm.nest<firrtl::CircuitOp>().addPass(firrtl::createResolvePathsPass());
+
   pm.nest<firrtl::CircuitOp>().addPass(firrtl::createLowerFIRRTLAnnotationsPass(
       disableAnnotationsUnknown, disableAnnotationsClassless,
       lowerAnnotationsNoRefTypePorts));
@@ -355,30 +359,18 @@ static LogicalResult processBuffer(
   if (loweringOptions.getNumOccurrences())
     loweringOptions.setAsAttribute(module.get());
 
-  if (failed(pm.run(module.get())))
-    return failure();
-
   // Add passes specific to Verilog emission if we're going there.
   if (outputFormat == OutputVerilog || outputFormat == OutputSplitVerilog ||
       outputFormat == OutputIRVerilog) {
-    PassManager exportPm(&context);
-    exportPm.enableTiming(ts);
-    if (failed(applyPassManagerCLOptions(exportPm)))
-      return failure();
-    if (verbosePassExecutions)
-      exportPm.addInstrumentation(
-          std::make_unique<
-              VerbosePassInstrumentation<firrtl::CircuitOp, mlir::ModuleOp>>(
-              "firtool"));
     // Legalize unsupported operations within the modules.
-    exportPm.nest<hw::HWModuleOp>().addPass(sv::createHWLegalizeModulesPass());
+    pm.nest<hw::HWModuleOp>().addPass(sv::createHWLegalizeModulesPass());
 
     // Tidy up the IR to improve verilog emission quality.
     if (!firtoolOptions.disableOptimization)
-      exportPm.nest<hw::HWModuleOp>().addPass(sv::createPrettifyVerilogPass());
+      pm.nest<hw::HWModuleOp>().addPass(sv::createPrettifyVerilogPass());
 
     if (stripFirDebugInfo)
-      exportPm.addPass(
+      pm.addPass(
           circt::createStripDebugInfoWithPredPass([](mlir::Location loc) {
             if (auto fileLoc = loc.dyn_cast<FileLineColLoc>())
               return fileLoc.getFilename().getValue().endswith(".fir");
@@ -386,37 +378,42 @@ static LogicalResult processBuffer(
           }));
 
     if (stripDebugInfo)
-      exportPm.addPass(circt::createStripDebugInfoWithPredPass(
+      pm.addPass(circt::createStripDebugInfoWithPredPass(
           [](mlir::Location loc) { return true; }));
 
     // Emit module and testbench hierarchy JSON files.
     if (exportModuleHierarchy)
-      exportPm.addPass(sv::createHWExportModuleHierarchyPass(outputFilename));
+      pm.addPass(sv::createHWExportModuleHierarchyPass(outputFilename));
+
+    // Check inner symbols and inner refs.
+    pm.addPass(hw::createVerifyInnerRefNamespacePass());
 
     // Emit a single file or multiple files depending on the output format.
     switch (outputFormat) {
     default:
       llvm_unreachable("can't reach this");
     case OutputVerilog:
-      exportPm.addPass(createExportVerilogPass((*outputFile)->os()));
+      pm.addPass(createExportVerilogPass((*outputFile)->os()));
       break;
     case OutputSplitVerilog:
-      exportPm.addPass(createExportSplitVerilogPass(outputFilename));
+      pm.addPass(createExportSplitVerilogPass(outputFilename));
       break;
     case OutputIRVerilog:
       // Run the ExportVerilog pass to get its lowering, but discard the output.
-      exportPm.addPass(createExportVerilogPass(llvm::nulls()));
+      pm.addPass(createExportVerilogPass(llvm::nulls()));
       break;
     }
 
     // Run final IR mutations to clean it up after ExportVerilog and before
     // emitting the final MLIR.
-    if (!mlirOutFile.empty())
-      exportPm.addPass(firrtl::createFinalizeIRPass());
-
-    if (failed(exportPm.run(module.get())))
-      return failure();
+    if (!mlirOutFile.empty()) {
+      pm.addPass(firrtl::createFinalizeIRPass());
+      pm.addPass(om::createFreezePathsPass());
+    }
   }
+
+  if (failed(pm.run(module.get())))
+    return failure();
 
   if (outputFormat == OutputIRFir || outputFormat == OutputIRHW ||
       outputFormat == OutputIRSV || outputFormat == OutputIRVerilog) {
@@ -625,6 +622,7 @@ int main(int argc, char **argv) {
 
     // Dialect passes:
     firrtl::registerPasses();
+    om::registerPasses();
     sv::registerPasses();
 
     // Export passes:
@@ -632,6 +630,13 @@ int main(int argc, char **argv) {
     registerExportSplitChiselInterfacePass();
     registerExportSplitVerilogPass();
     registerExportVerilogPass();
+
+    // Conversion passes:
+    registerPrepareForEmissionPass();
+    registerLowerFIRRTLToHWPass();
+    registerLegalizeAnonEnumsPass();
+    registerLowerSeqToSVPass();
+    registerLowerVerifToSVPass();
   }
 
   // Register any pass manager command line options.
