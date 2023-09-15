@@ -58,7 +58,7 @@ jobs:
             export CCACHE_DIR=$PWD/ccache
             git config --global --add safe.directory $PWD
             CMAKE_TOOLS_KITS_FILE=.devcontainer/cmake-tools-kits.json \
-              sil-core/support/cmake-helper configure
+              mlir/support/cmake-helper configure
       # We run the build, once to check the targets and once to log the errors without any progress logs cluttering the output (since it is a trivial incremental build). Please take care to make sure the following two steps stay in sync.
       - name: Check targets
         id: check-targets
