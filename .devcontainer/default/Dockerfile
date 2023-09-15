@@ -25,7 +25,7 @@ RUN chmod +x /root/install-cmake-$TARGETARCH.sh && \
       rm /root/install-cmake-*.sh
 
 # Install clang
-ARG CLANG_VERSION=16
+ARG CLANG_VERSION=17
 ADD https://apt.llvm.org/llvm-snapshot.gpg.key /root/llvm-snapshot.gpg.key
 RUN DEBIAN_FRONTEND="noninteractive" \
       apt-get install -y software-properties-common gnupg && \
@@ -63,7 +63,7 @@ RUN cd /scala && \
     rm /scala/coursier-install-*.gz
 
 # Install Swift Nightly Toolchain
-ARG SWIFT_SNAPSHOT=DEVELOPMENT-SNAPSHOT-2023-07-23-a
+ARG SWIFT_SNAPSHOT=DEVELOPMENT-SNAPSHOT-2023-09-13-a
 ADD https://swift.org/keys/all-keys.asc /swift/all-keys.asc
 ADD https://download.swift.org/development/ubuntu2204-aarch64/swift-$SWIFT_SNAPSHOT/swift-$SWIFT_SNAPSHOT-ubuntu22.04-aarch64.tar.gz /swift/toolchain-arm64.tar.gz
 ADD https://download.swift.org/development/ubuntu2204/swift-$SWIFT_SNAPSHOT/swift-$SWIFT_SNAPSHOT-ubuntu22.04.tar.gz /swift/toolchain-amd64.tar.gz

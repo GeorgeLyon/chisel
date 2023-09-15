@@ -17,3 +17,4 @@ cp -R .actual-devcontainer/$DEVCONTAINER_NAME .devcontainer
 
 # Copy the devcontainer back to its original location so bind mounts (like .vscode) resolve properly
 cp -R .actual-devcontainer/$DEVCONTAINER_NAME .devcontainer/$DEVCONTAINER_NAME
+          

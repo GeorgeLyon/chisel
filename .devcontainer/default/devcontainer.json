@@ -1,5 +1,5 @@
 {
-  "name": "Circel",
+  "name": "CIRCEL",
   "dockerFile": "Dockerfile",
   "runArgs": [
     "--cap-add=SYS_PTRACE",
@@ -16,7 +16,7 @@
     "source=shared-llvm-ccache-config,target=/root/.config/ccache,type=volume"
   ],
   "containerEnv": {
-    "LOCAL_WORKSPACE_FOLDER": "${localWorkspaceFolder}"
+    "LOCAL_WORKSPACE_FOLDER": "${localWorkspaceFolder}",
   },
   "customizations": {
     "vscode": {
@@ -25,7 +25,7 @@
         "llvm-vs-code-extensions.vscode-mlir",
         "ms-vscode.cmake-tools",
         "scalameta.metals",
-        "timonwong.shellcheck"
+        "vadimcn.vscode-lldb"
       ]
     }
   }

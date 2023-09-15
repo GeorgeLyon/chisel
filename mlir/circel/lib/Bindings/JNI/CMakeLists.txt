@@ -1,18 +1,56 @@
-find_package(Java REQUIRED)
-find_package(JNI REQUIRED)
-include(UseJava)
+function(add_mlir_jni_library name)
+  cmake_parse_arguments(ARG
+    ""
+    ""
+    "JNI_SOURCE_PAIRS;ADDITIONAL_JAVA_SOURCES;ADDITIONAL_CPP_SOURCES;JNI_DEPENDENCIES;LINK_LIBS"
+    ${ARGN})
 
-add_jar(CircelJNI_Java
-    NativeObject.java
-    GENERATE_NATIVE_HEADERS CircelJNIHeaders)
-add_circt_library(CircelJNI
+  find_package(Java REQUIRED)
+  find_package(JNI REQUIRED)
+  include(UseJava)
+
+  set(JNI_JAVA_SOURCES ${ARG_JNI_SOURCE_PAIRS})
+  list(TRANSFORM JNI_JAVA_SOURCES APPEND .java)
+
+  set(JNI_CPP_SOURCES ${ARG_JNI_SOURCE_PAIRS})
+  list(TRANSFORM JNI_CPP_SOURCES APPEND .cpp)
+
+  set(JAR_DEPENDENCIES ${ARG_JNI_DEPENDENCIES})
+  list(TRANSFORM JAR_DEPENDENCIES APPEND _Jar)
+
+  add_jar(${name}_Jar
+    ${JNI_JAVA_SOURCES}
+    ${ARG_ADDITIONAL_JAVA_SOURCES}
+
+    INCLUDE_JARS
+    ${JAR_DEPENDENCIES}
+
+    GENERATE_NATIVE_HEADERS ${name}_Headers)
+  add_mlir_library(${name}
     SHARED
 
-    NativeObject.cpp
+    ${JNI_CPP_SOURCES}
+    ${ARG_ADDITIONAL_CPP_SOURCES}
+
+    EXCLUDE_FROM_LIBMLIR
+    DISABLE_INSTALL
     
-    LINK_LIBS PRIVATE
-    CIRCTFirtool
-    MLIRBindingsSupport
+    LINK_LIBS 
+    ${ARG_LINK_LIBS}
+    ${ARG_JNI_DEPENDENCIES}
+    ${name}_Headers
     )
-target_link_libraries(CircelJNI PRIVATE CircelJNIHeaders)
-target_include_directories(CircelJNI PRIVATE ${JNI_INCLUDE_DIRS})
+  set_target_properties(${name} PROPERTIES
+    BUILD_WITH_INSTALL_RPATH OFF
+    BUILD_RPATH "."
+    INSTALL_RPATH "."
+  )
+  set_target_properties(${name} PROPERTIES SUFFIX ".jni")
+  target_include_directories(${name} PRIVATE ${JNI_INCLUDE_DIRS})
+
+  # Add to the global classpath
+  get_target_property(JAR_FILE ${name}_Jar JAR_FILE)
+  set_property(GLOBAL APPEND PROPERTY MLIR_JAVA_CLASSPATH ${JAR_FILE})
+endfunction()
+
+add_subdirectory(MLIR)

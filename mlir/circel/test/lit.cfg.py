@@ -56,3 +56,8 @@ tools = [
 ]
 
 llvm_config.add_tool_substitutions(tools, tool_dirs)
+
+# Add Java-related pathsubstitutions
+config.substitutions.append(('%MLIR_JAVA_CLASSPATH_ARGUMENT%', config.mlir_java_classpath_argument))
+config.substitutions.append(('%MLIR_LIB_DIRECTORY%', config.circel_obj_root + 
+'/../lib'))
