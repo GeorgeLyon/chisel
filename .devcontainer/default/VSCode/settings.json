@@ -1,7 +1,9 @@
-// Note: There are some additional constraints on workspace settings because of how we test the configuration is valid. See `.devcontainer/extract-cmake-arguments.sh` for details
+// Note: There are some additional constraints on workspace settings because we use this file as a source of truth for mlir/support/cmake-helper
 {
+  // Git
+  // - LLVM's massive size really degrades the performance of VSCode's git integration, so we disable submodules to keep things snappy
+  "git.ignoreSubmodules": true,
   // CMake Settings
-  "cmake.useProjectStatusView": true,
   "cmake.sourceDirectory": "${workspaceFolder}/mlir/llvm/llvm",
   "cmake.buildDirectory": "${workspaceFolder}/build/circel",
   "cmake.installPrefix": "/usr/local",
@@ -9,11 +11,12 @@
   "cmake.configureOnEdit": false,
   "cmake.generator": "Ninja",
   "cmake.configureArgs": [
-    // -- CMAKE
+    // CMAKE
     "-DCMAKE_WARN_DEPRECATED=OFF",
     "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
     "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
-    // -- LLVM
+    "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON",
+    // LLVM
     "-DLLVM_ENABLE_ASSERTIONS=ON",
     "-DLLVM_ENABLE_PROJECTS=mlir",
     "-DLLVM_TARGETS_TO_BUILD=",
@@ -21,13 +24,10 @@
     "-DLLVM_ENABLE_OCAMLDOC=OFF",
     "-DLLVM_ENABLE_BINDINGS=OFF",
     "-DLLVM_ENABLE_MODULES=OFF",
-    // -- LLVM (performance)
-    // LLVM_OPTIMIZED_TABLEGEN is not compatible with disabling LLHD
-    "-DLLVM_OPTIMIZED_TABLEGEN=OFF",
+    // LLVM (performance)
+    "-DLLVM_OPTIMIZED_TABLEGEN=OFF", // Not compatible with disabling LLHD
     "-DLLVM_USE_SPLIT_DWARF=ON",
-    "-DLLVM_USE_RELATIVE_PATHS_IN_DEBUG_INFO=OFF",
-    "-DLLVM_USE_RELATIVE_PATHS_IN_FILES=OFF",
-    // -- CIRCT 
+    // CIRCT / CIRCEL 
     "-DLLVM_EXTERNAL_PROJECTS=circt;circel",
     "-DLLVM_EXTERNAL_CIRCT_SOURCE_DIR=${workspaceFolder}/mlir/circt",
     "-DLLVM_EXTERNAL_CIRCEL_SOURCE_DIR=${workspaceFolder}/mlir/circel",
@@ -35,11 +35,12 @@
     "-DCIRCT_LLHD_SIM_ENABLED=OFF"
   ],
   // Clangd Settings
-  "clangd.path": "clangd-16",
+  "clangd.path": "clangd-17",
   "clangd.checkUpdates": false,
   "clangd.onConfigChanged": "restart",
   "clangd.arguments": [
-    "--compile-commands-dir=${workspaceFolder}/build/circel"
+    "--compile-commands-dir=${workspaceFolder}/build/circel",
+    "--header-insertion=never"
   ],
   // MLIR
   "mlir.server_path": "/usr/local/bin/circt-lsp-server",

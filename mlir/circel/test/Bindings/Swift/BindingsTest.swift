@@ -3,7 +3,7 @@
 import CxxStdlib
 import MLIR_Bindings_Support
 
-let context = mlir.bindings.Context();
+let context = mlir.bindings.ScopedContext.create()
 
 // CHECK: Hello, Swift!
 print("Hello, Swift!")

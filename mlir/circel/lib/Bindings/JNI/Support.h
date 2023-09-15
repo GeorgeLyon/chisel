@@ -1,6 +1,0 @@
-#ifndef MLIR_BINDINGS_JNI_SUPPORT_H_
-#define MLIR_BINDINGS_JNI_SUPPORT_H_
-
-#include <jni.h>
-
-#endif // MLIR_BINDINGS_JNI_SUPPORT_H_

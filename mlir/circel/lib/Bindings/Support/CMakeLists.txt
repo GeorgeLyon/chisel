@@ -1,7 +1,8 @@
 add_mlir_library(MLIRBindingsSupport
-    Context.cpp
-    Location.cpp
-    NativeReference.cpp
+    OpaquePointer.cpp
+    ReferenceCountedPointer.cpp
+    ScopedBuilder.cpp
+    ScopedContext.cpp
 
     LINK_LIBS PRIVATE
     MLIRIR

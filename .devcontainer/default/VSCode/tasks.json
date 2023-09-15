@@ -1,33 +1,33 @@
 {
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "type": "cmake",
-      "label": "Build Circel",
-      "command": "build",
-      "targets": [
-        "CircelJNI"
-      ],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
-      "problemMatcher": [],
-      "detail": "Build Circel"
-    },
-    {
-      "type": "cmake",
-      "label": "Test Circel",
-      "command": "build",
-      "targets": [
-        "check-circel"
-      ],
-      "group": {
-        "kind": "test",
-        "isDefault": true
-      },
-      "problemMatcher": [],
-      "detail": "Test Circel"
-    }
-  ]
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "cmake",
+			"label": "Build CIRCEL",
+			"command": "build",
+			"targets": [
+				"MLIRJNI",
+				"mlir-bindings-support-test",
+				"mlir-bindings-jni-test"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": [ ]
+		},
+		{
+			"type": "cmake",
+			"label": "Test CIRCEL",
+			"command": "build",
+			"targets": [
+				"check-circel"
+			],
+			"group": {
+				"kind": "test",
+				"isDefault": true
+			},
+			"problemMatcher": [ ]
+		}
+	]
 }
