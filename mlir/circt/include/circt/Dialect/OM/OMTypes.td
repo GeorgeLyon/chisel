@@ -51,17 +51,68 @@ def ListType : TypeDef<OMDialect, "List", []> {
   ];
 }
 
+def MapType : TypeDef<OMDialect, "Map", []> {
+  let summary = [{A type that represents a map. A key type must be either
+                  an integer or string type}];
+
+  let mnemonic = "map";
+  let parameters = (ins "mlir::Type": $keyType, "mlir::Type":$valueType);
+  let assemblyFormat = [{
+    `<` $keyType `,` $valueType `>`
+  }];
+
+  let builders = [
+    AttrBuilderWithInferredContext<(ins "::mlir::Type":$keyType, "::mlir::Type":$valueType), [{
+      return $_get(keyType.getContext(), keyType, valueType);
+    }]>
+  ];
+
+  let genVerifyDecl = 1;
+}
+
 def SymbolRefType : TypeDef<OMDialect, "SymbolRef", []> {
   let summary = "A type that represents a reference to a flat symbol reference.";
 
   let mnemonic = "sym_ref";
 }
 
+def OMIntegerType : TypeDef<OMDialect, "OMInteger", []> {
+  let summary = "A type that represents an arbitrary width integer.";
+
+  let mnemonic = "integer";
+}
 
 def StringType : TypeDef<OMDialect, "String", []> {
   let summary = "A type that represents a string.";
 
   let mnemonic = "string";
+}
+
+def PathType : TypeDef<OMDialect, "Path", []> {
+  let summary = "A path to a hardware component";
+
+  let mnemonic = "path";
+}
+
+def EnumType : TypeDef<OMDialect, "Enum", []> {
+  let summary = "An enum type";
+
+  let mnemonic = "enum";
+  let parameters = (
+    ins ArrayRefParameter<
+      "::circt::om::EnumType::EnumElement", 
+      "enum fields">: $elements
+  );
+  let hasCustomAssemblyFormat = 1;
+  let extraClassDeclaration = [{
+    using EnumElement = ::circt::om::detail::EnumElement;
+  }];
+}
+
+def OMAnyType : TypeDef<OMDialect, "Any", []> {
+  let summary = "A type that represents any valid OM type.";
+
+  let mnemonic = "any";
 }
 
 #endif // CIRCT_DIALECT_OM_OMTYPES_TD

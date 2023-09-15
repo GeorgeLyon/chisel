@@ -315,12 +315,12 @@ CreateSiFiveMetadataPass::emitMemoryMetadata(ObjectModelIR &omir) {
         for (auto p : paths) {
           if (p.empty())
             continue;
-          auto top = p.front();
+          auto top = p.top();
           std::string hierName =
               addSymbolToVerbatimOp(top->getParentOfType<FModuleOp>(),
                                     jsonSymbols)
                   .c_str();
-          auto finalInst = p.back();
+          auto finalInst = p.leaf();
           for (auto inst : llvm::drop_end(p)) {
             auto parentModule = inst->getParentOfType<FModuleOp>();
             if (dutMod == parentModule)
@@ -619,7 +619,7 @@ void CreateSiFiveMetadataPass::runOnOperation() {
   if (it != body->end()) {
     dutMod = dyn_cast<FModuleOp>(*it);
     auto &instanceGraph = getAnalysis<InstanceGraph>();
-    auto *node = instanceGraph.lookup(cast<hw::HWModuleLike>(*it));
+    auto *node = instanceGraph.lookup(cast<igraph::ModuleOpInterface>(*it));
     llvm::for_each(llvm::depth_first(node),
                    [&](igraph::InstanceGraphNode *node) {
                      dutModuleSet.insert(node->getModule());

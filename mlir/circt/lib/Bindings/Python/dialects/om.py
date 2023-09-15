@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from ._om_ops_gen import *
-from .._mlir_libs._circt._om import Evaluator as BaseEvaluator, Object as BaseObject, ClassType, ReferenceAttr, ListAttr
+from .._mlir_libs._circt._om import Evaluator as BaseEvaluator, Object as BaseObject, List as BaseList, Tuple as BaseTuple, Map as BaseMap, ClassType, ReferenceAttr, ListAttr, MapAttr
 
 from ..ir import Attribute, Diagnostic, DiagnosticSeverity, Module, StringAttr
 from ..support import attribute_to_var, var_to_attribute
@@ -19,6 +19,103 @@ if TYPE_CHECKING:
   from _typeshed.stdlib.dataclass import DataclassInstance
 
 
+# Wrap a base mlir object with high-level object.
+def wrap_mlir_object(value):
+  # For primitives, return a Python value.
+  if isinstance(value, Attribute):
+    return attribute_to_var(value)
+
+  if isinstance(value, BaseList):
+    return List(value)
+
+  if isinstance(value, BaseTuple):
+    return Tuple(value)
+
+  if isinstance(value, BaseMap):
+    return Map(value)
+
+  # For objects, return an Object, wrapping the base implementation.
+  assert isinstance(value, BaseObject)
+  return Object(value)
+
+
+def unwrap_python_object(value):
+  # Check if the value is a Primitive.
+  try:
+    return var_to_attribute(value)
+  except:
+    pass
+
+  if isinstance(value, List):
+    return BaseList(value)
+
+  if isinstance(value, Tuple):
+    return BaseTuple(value)
+
+  if isinstance(value, Map):
+    return BaseMap(value)
+
+  # Otherwise, it must be an Object. Cast to the mlir object.
+  assert isinstance(value, Object)
+  return BaseObject(value)
+
+
+class List(BaseList):
+
+  def __init__(self, obj: BaseList) -> None:
+    super().__init__(obj)
+
+  def __getitem__(self, i):
+    val = super().__getitem__(i)
+    return wrap_mlir_object(val)
+
+  # Support iterating over a List by yielding its elements.
+  def __iter__(self):
+    for i in range(0, self.__len__()):
+      yield self.__getitem__(i)
+
+
+class Tuple(BaseTuple):
+
+  def __init__(self, obj: BaseTuple) -> None:
+    super().__init__(obj)
+
+  def __getitem__(self, i):
+    val = super().__getitem__(i)
+    return wrap_mlir_object(val)
+
+  # Support iterating over a Tuple by yielding its elements.
+  def __iter__(self):
+    for i in range(0, self.__len__()):
+      yield self.__getitem__(i)
+
+
+class Map(BaseMap):
+
+  def __init__(self, obj: BaseMap) -> None:
+    super().__init__(obj)
+
+  def __getitem__(self, key):
+    val = super().__getitem__(key)
+    return wrap_mlir_object(val)
+
+  def keys(self):
+    return [wrap_mlir_object(arg) for arg in super().keys()]
+
+  def items(self):
+    for i in self:
+      yield i
+
+  def values(self):
+    for (_, v) in self:
+      yield v
+
+  # Support iterating over a Map
+  def __iter__(self):
+    for i in super().keys():
+      yield (wrap_mlir_object(i), self.__getitem__(i))
+
+
 # Define the Object class by inheriting from the base implementation in C++.
 class Object(BaseObject):
 
@@ -28,14 +125,7 @@ class Object(BaseObject):
   def __getattr__(self, name: str):
     # Call the base method to get a field.
     field = super().__getattr__(name)
-
-    # For primitives, return a Python value.
-    if isinstance(field, Attribute):
-      return attribute_to_var(field)
-
-    # For objects, return an Object, wrapping the base implementation.
-    assert isinstance(field, BaseObject)
-    return Object(field)
+    return wrap_mlir_object(field)
 
   # Support iterating over an Object by yielding its fields.
   def __iter__(self):
@@ -73,10 +163,9 @@ class Evaluator(BaseEvaluator):
       # Get the class name from the class name.
       class_name = StringAttr.get(cls)
 
-      # Get the actual parameter Attributes from the supplied variadic
-      # arguments. This relies on the circt.support helpers to convert from
-      # Python objects to Attributes.
-      actual_params = var_to_attribute(list(args))
+      # Get the actual parameter Values from the supplied variadic
+      # arguments.
+      actual_params = [unwrap_python_object(arg) for arg in args]
 
     # Call the base instantiate method.
     obj = super().instantiate(class_name, actual_params)

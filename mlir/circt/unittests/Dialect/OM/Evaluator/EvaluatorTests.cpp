@@ -110,7 +110,7 @@ TEST(EvaluatorTests, InstantiateNullParam) {
   });
 
   auto result =
-      evaluator.instantiate(builder.getStringAttr("MyClass"), {IntegerAttr()});
+      evaluator.instantiate(builder.getStringAttr("MyClass"), {nullptr});
 
   ASSERT_FALSE(succeeded(result));
 }
@@ -140,8 +140,10 @@ TEST(EvaluatorTests, InstantiateInvalidParamType) {
     ASSERT_EQ(diag.str(), "actual parameter for \"param\" has invalid type");
   });
 
-  auto result = evaluator.instantiate(builder.getStringAttr("MyClass"),
-                                      {builder.getF32FloatAttr(42)});
+  auto result =
+      evaluator.instantiate(builder.getStringAttr("MyClass"),
+                            getEvaluatorValuesFromAttributes(
+                                &context, {builder.getF32FloatAttr(42)}));
 
   ASSERT_FALSE(succeeded(result));
 }
@@ -201,15 +203,20 @@ TEST(EvaluatorTests, InstantiateObjectWithParamField) {
 
   Evaluator evaluator(mod);
 
-  auto result = evaluator.instantiate(builder.getStringAttr("MyClass"),
-                                      {builder.getI32IntegerAttr(42)});
+  auto result =
+      evaluator.instantiate(builder.getStringAttr("MyClass"),
+                            getEvaluatorValuesFromAttributes(
+                                &context, {builder.getI32IntegerAttr(42)}));
 
   ASSERT_TRUE(succeeded(result));
 
-  auto fieldValue =
-      std::get<Attribute>(
-          result.value()->getField(builder.getStringAttr("field")).value())
-          .dyn_cast<IntegerAttr>();
+  auto fieldValue = llvm::cast<evaluator::AttributeValue>(
+                        result.value()
+                            ->getField(builder.getStringAttr("field"))
+                            .value()
+                            .get())
+                        ->getAs<IntegerAttr>();
+
   ASSERT_TRUE(fieldValue);
   ASSERT_EQ(fieldValue.getValue(), 42);
 }
@@ -240,10 +247,12 @@ TEST(EvaluatorTests, InstantiateObjectWithConstantField) {
 
   ASSERT_TRUE(succeeded(result));
 
-  auto fieldValue =
-      std::get<Attribute>(
-          result.value()->getField(builder.getStringAttr("field")).value())
-          .dyn_cast<IntegerAttr>();
+  auto fieldValue = cast<evaluator::AttributeValue>(
+                        result.value()
+                            ->getField(builder.getStringAttr("field"))
+                            .value()
+                            .get())
+                        ->getAs<IntegerAttr>();
   ASSERT_TRUE(fieldValue);
   ASSERT_EQ(fieldValue.getValue(), 42);
 }
@@ -278,20 +287,22 @@ TEST(EvaluatorTests, InstantiateObjectWithChildObject) {
 
   Evaluator evaluator(mod);
 
-  auto result = evaluator.instantiate(builder.getStringAttr("MyClass"),
-                                      {builder.getI32IntegerAttr(42)});
+  auto result =
+      evaluator.instantiate(builder.getStringAttr("MyClass"),
+                            {std::make_shared<evaluator::AttributeValue>(
+                                builder.getI32IntegerAttr(42))});
 
   ASSERT_TRUE(succeeded(result));
 
-  auto fieldValue = std::get<std::shared_ptr<Object>>(
-      result.value()->getField(builder.getStringAttr("field")).value());
+  auto *fieldValue = llvm::cast<evaluator::ObjectValue>(
+      result.value()->getField(builder.getStringAttr("field")).value().get());
 
   ASSERT_TRUE(fieldValue);
 
   auto innerFieldValue =
-      std::get<Attribute>(
-          fieldValue->getField(builder.getStringAttr("field")).value())
-          .cast<IntegerAttr>();
+      llvm::cast<evaluator::AttributeValue>(
+          fieldValue->getField(builder.getStringAttr("field")).value().get())
+          ->getAs<IntegerAttr>();
 
   ASSERT_EQ(innerFieldValue.getValue(), 42);
 }
@@ -330,15 +341,19 @@ TEST(EvaluatorTests, InstantiateObjectWithFieldAccess) {
 
   Evaluator evaluator(mod);
 
-  auto result = evaluator.instantiate(builder.getStringAttr("MyClass"),
-                                      {builder.getI32IntegerAttr(42)});
+  auto result =
+      evaluator.instantiate(builder.getStringAttr("MyClass"),
+                            {std::make_shared<evaluator::AttributeValue>(
+                                builder.getI32IntegerAttr(42))});
 
   ASSERT_TRUE(succeeded(result));
 
-  auto fieldValue =
-      std::get<Attribute>(
-          result.value()->getField(builder.getStringAttr("field")).value())
-          .cast<IntegerAttr>();
+  auto fieldValue = llvm::cast<evaluator::AttributeValue>(
+                        result.value()
+                            ->getField(builder.getStringAttr("field"))
+                            .value()
+                            .get())
+                        ->getAs<IntegerAttr>();
 
   ASSERT_TRUE(fieldValue);
   ASSERT_EQ(fieldValue.getValue(), 42);
@@ -375,11 +390,11 @@ TEST(EvaluatorTests, InstantiateObjectWithChildObjectMemoized) {
 
   ASSERT_TRUE(succeeded(result));
 
-  auto field1Value = std::get<std::shared_ptr<Object>>(
-      result.value()->getField(builder.getStringAttr("field1")).value());
+  auto *field1Value = llvm::cast<evaluator::ObjectValue>(
+      result.value()->getField(builder.getStringAttr("field1")).value().get());
 
-  auto field2Value = std::get<std::shared_ptr<Object>>(
-      result.value()->getField(builder.getStringAttr("field2")).value());
+  auto *field2Value = llvm::cast<evaluator::ObjectValue>(
+      result.value()->getField(builder.getStringAttr("field2")).value().get());
 
   auto fieldNames = result.value()->getFieldNames();
 
@@ -395,6 +410,95 @@ TEST(EvaluatorTests, InstantiateObjectWithChildObjectMemoized) {
   ASSERT_TRUE(field2Value);
 
   ASSERT_EQ(field1Value, field2Value);
+}
+
+TEST(EvaluatorTests, AnyCastObject) {
+  DialectRegistry registry;
+  registry.insert<OMDialect>();
+
+  MLIRContext context(registry);
+  context.getOrLoadDialect<OMDialect>();
+
+  Location loc(UnknownLoc::get(&context));
+
+  ImplicitLocOpBuilder builder(loc, &context);
+
+  auto mod = builder.create<ModuleOp>(loc);
+
+  builder.setInsertionPointToStart(&mod.getBodyRegion().front());
+  auto innerCls = builder.create<ClassOp>("MyInnerClass");
+  innerCls.getBody().emplaceBlock();
+
+  builder.setInsertionPointToStart(&mod.getBodyRegion().front());
+  auto cls = builder.create<ClassOp>("MyClass");
+  auto &body = cls.getBody().emplaceBlock();
+  builder.setInsertionPointToStart(&body);
+  auto object = builder.create<ObjectOp>(innerCls, body.getArguments());
+  auto cast = builder.create<AnyCastOp>(object);
+  builder.create<ClassFieldOp>("field", cast);
+
+  Evaluator evaluator(mod);
+
+  auto result = evaluator.instantiate(builder.getStringAttr("MyClass"), {});
+
+  ASSERT_TRUE(succeeded(result));
+
+  auto *fieldValue = llvm::cast<evaluator::ObjectValue>(
+      result.value()->getField(builder.getStringAttr("field")).value().get());
+
+  ASSERT_TRUE(fieldValue);
+
+  ASSERT_EQ(fieldValue->getClassOp(), innerCls);
+}
+
+TEST(EvaluatorTests, AnyCastParam) {
+  DialectRegistry registry;
+  registry.insert<OMDialect>();
+
+  MLIRContext context(registry);
+  context.getOrLoadDialect<OMDialect>();
+
+  Location loc(UnknownLoc::get(&context));
+
+  ImplicitLocOpBuilder builder(loc, &context);
+
+  auto mod = builder.create<ModuleOp>(loc);
+
+  builder.setInsertionPointToStart(&mod.getBodyRegion().front());
+  auto innerCls = ClassOp::buildSimpleClassOp(
+      builder, builder.getLoc(), "MyInnerClass", {"param"}, {"field"},
+      {AnyType::get(&context)});
+
+  auto i64 = builder.getIntegerType(64);
+  builder.setInsertionPointToStart(&mod.getBodyRegion().front());
+  StringRef params[] = {"param"};
+  auto cls = builder.create<ClassOp>("MyClass", params);
+  auto &body = cls.getBody().emplaceBlock();
+  body.addArguments({i64}, {builder.getLoc()});
+  builder.setInsertionPointToStart(&body);
+  auto cast = builder.create<AnyCastOp>(body.getArgument(0));
+  SmallVector<Value> objectParams = {cast};
+  auto object = builder.create<ObjectOp>(innerCls, objectParams);
+  builder.create<ClassFieldOp>("field", object);
+
+  Evaluator evaluator(mod);
+
+  auto result =
+      evaluator.instantiate(builder.getStringAttr("MyClass"),
+                            getEvaluatorValuesFromAttributes(
+                                &context, {builder.getIntegerAttr(i64, 42)}));
+
+  ASSERT_TRUE(succeeded(result));
+
+  auto *fieldValue = llvm::cast<evaluator::ObjectValue>(
+      result.value()->getField(builder.getStringAttr("field")).value().get());
+
+  ASSERT_TRUE(fieldValue);
+
+  auto *innerFieldValue = llvm::cast<evaluator::AttributeValue>(
+      fieldValue->getField(builder.getStringAttr("field")).value().get());
+
+  ASSERT_EQ(innerFieldValue->getAs<IntegerAttr>().getValue(), 42);
 }
 
 } // namespace

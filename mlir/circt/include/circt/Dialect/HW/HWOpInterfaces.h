@@ -23,6 +23,10 @@
 namespace circt {
 namespace hw {
 
+void populateHWModuleLikeTypeConversionPattern(StringRef moduleLikeOpName,
+                                               RewritePatternSet &patterns,
+                                               TypeConverter &converter);
+
 /// This holds the name, type, direction of a module's ports
 struct PortInfo : public ModulePort {
   /// This is the argument index or the result index depending on the direction.
@@ -44,6 +48,8 @@ struct PortInfo : public ModulePort {
   ssize_t getId() const { return isOutput() ? argNum : (-1 - argNum); };
 };
 
+raw_ostream &operator<<(raw_ostream &printer, PortInfo port);
+
 /// This holds a decoded list of input/inout and output ports for a module or
 /// instance.
 struct ModulePortInfo {
@@ -51,10 +57,13 @@ struct ModulePortInfo {
                           ArrayRef<PortInfo> outputs) {
     ports.insert(ports.end(), inputs.begin(), inputs.end());
     ports.insert(ports.end(), outputs.begin(), outputs.end());
+    sanitizeInOut();
   }
 
   explicit ModulePortInfo(ArrayRef<PortInfo> mergedPorts)
-      : ports(mergedPorts.begin(), mergedPorts.end()) {}
+      : ports(mergedPorts.begin(), mergedPorts.end()) {
+    sanitizeInOut();
+  }
 
   using iterator = SmallVector<PortInfo>::iterator;
   using const_iterator = SmallVector<PortInfo>::const_iterator;
@@ -160,6 +169,15 @@ struct ModulePortInfo {
   }
 
 private:
+  // convert input inout<type> -> inout type
+  void sanitizeInOut() {
+    for (auto &p : ports)
+      if (auto inout = dyn_cast<hw::InOutType>(p.type)) {
+        p.type = inout.getElementType();
+        p.dir = ModulePort::Direction::InOut;
+      }
+  }
+
   /// This contains a list of all ports.  Input first.
   SmallVector<PortInfo> ports;
 };
@@ -218,6 +236,17 @@ namespace detail {
 LogicalResult verifyInnerRefNamespace(Operation *op);
 } // namespace detail
 
+/// Classify operations that are InnerRefNamespace-like,
+/// until structure is in place to do this via Traits.
+/// Useful for getParentOfType<>, or scheduling passes.
+/// Prefer putting the trait on operations here or downstream.
+struct InnerRefNamespaceLike {
+  /// Return if this operation is explicitly an IRN or appears compatible.
+  static bool classof(mlir::Operation *op);
+  /// Return if this operation is explicitly an IRN or appears compatible.
+  static bool classof(const mlir::RegisteredOperationName *opInfo);
+};
+
 } // namespace hw
 } // namespace circt
 
@@ -257,7 +286,7 @@ public:
 
     // InnerSymbolTable's must be directly nested within an InnerRefNamespace.
     auto *parent = op->getParentOp();
-    if (!parent || !parent->hasTrait<InnerRefNamespace>())
+    if (!parent || !isa<circt::hw::InnerRefNamespaceLike>(parent))
       return op->emitError(
           "InnerSymbolTable must have InnerRefNamespace parent");
 

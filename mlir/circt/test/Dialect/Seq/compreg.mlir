@@ -52,7 +52,7 @@ hw.module @top(%clk: i1, %rst: i1, %i: i32, %s: !hw.struct<foo: i32>) {
   // SV:   sv.passign [[REG4]], %s : !hw.struct<foo: i32>
   // SV: }
   // ALWAYS: [[FOO_NEXT:%.+]] = hw.struct_create ([[R0_VAL]]) : !hw.struct<foo: i32>
-  // ALWAYS: %foo = sv.reg {sv.attributes = [#sv.attribute<"dont_merge">]} : !hw.inout<struct<foo: i32>> 
+  // ALWAYS: %foo = sv.reg {sv.attributes = [#sv.attribute<"dont_merge">]} : !hw.inout<struct<foo: i32>>
   // ALWAYS: sv.always posedge %clk {
   // ALWAYS:   sv.if %rst {
   // ALWAYS:     sv.passign %foo, [[FOO_NEXT]] : !hw.struct<foo: i32>
@@ -99,4 +99,30 @@ hw.module @top_ce(%clk: i1, %rst: i1, %ce: i1, %i: i32) {
   // ALWAYS:     }
   // ALWAYS:   }
   // ALWAYS: }
+}
+
+// SV-LABEL: @reg_of_clock_type
+hw.module @reg_of_clock_type(%clk: i1, %rst: i1, %i: !seq.clock) -> (out: !seq.clock) {
+  // SV: [[REG0:%.+]] = sv.reg : !hw.inout<i1>
+  // SV: [[REG0_VAL:%.+]] = sv.read_inout [[REG0]] : !hw.inout<i1>
+  // SV: sv.alwaysff(posedge %clk) {
+  // SV:   sv.passign [[REG0]], %i : i1
+  // SV: }
+  %r0 = seq.compreg %i, %clk : !seq.clock
+
+  // SV: [[REG1:%.+]] = sv.reg : !hw.inout<i1>
+  // SV: [[REG1_VAL:%.+]] = sv.read_inout [[REG1]] : !hw.inout<i1>
+  // SV: sv.alwaysff(posedge %clk) {
+  // SV:   sv.passign [[REG1]], [[REG0_VAL]] : i1
+  // SV: }
+  %r1 = seq.compreg %r0, %clk : !seq.clock
+
+  // SV: hw.output [[REG1_VAL]] : i1
+  hw.output %r1 : !seq.clock
+}
+
+hw.module @with_clock(%clock: !seq.clock, %rst: i1, %i: i32) {
+  %rv = hw.constant 0 : i32
+  // CHECK: seq.compreg %i, %clock, %rst, %c0_i32 : i32, !seq.clock
+  seq.compreg %i, %clock, %rst, %rv : i32, !seq.clock
 }

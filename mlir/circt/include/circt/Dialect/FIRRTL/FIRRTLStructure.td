@@ -65,7 +65,9 @@ class FIRRTLModuleLike<string mnemonic, list<Trait> traits = []> :
   FIRRTLOp<mnemonic, traits # [
     IsolatedFromAbove, Symbol, HasParent<"CircuitOp">,
     DeclareOpInterfaceMethods<FModuleLike>,
-    DeclareOpInterfaceMethods<HWModuleLike>,
+    DeclareOpInterfaceMethods<PortList>,
+    DeclareOpInterfaceMethods<SymboledPortList>,
+    DeclareOpInterfaceMethods<InstanceGraphModuleOpInterface>,
     DeclareOpInterfaceMethods<SymbolUserOpInterface>,
     OpAsmOpInterface, InnerSymbolTable]> {
 
@@ -74,17 +76,9 @@ class FIRRTLModuleLike<string mnemonic, list<Trait> traits = []> :
   code extraModuleClassDeclaration = [{}];
 
   let extraClassDeclaration = extraModuleClassDeclaration # [{
-
-    //===------------------------------------------------------------------===//
-    // PortList Methods
-    //===------------------------------------------------------------------===//
-    ::circt::hw::ModulePortInfo getPortList();
   }];
 
   let extraClassDefinition = extraModuleClassDefinition # [{
-    size_t $cppClass::getNumPorts() {
-      return getPortTypesAttr().size();
-    }
 
     circt::hw::InnerSymAttr $cppClass::getPortSymbolAttr(size_t portIndex) {
       auto syms = getPortSymbols();
@@ -92,6 +86,48 @@ class FIRRTLModuleLike<string mnemonic, list<Trait> traits = []> :
           syms[portIndex].template cast<hw::InnerSymAttr>().empty())
         return hw::InnerSymAttr();
       return syms[portIndex].template cast<hw::InnerSymAttr>();
+    }
+
+    size_t $cppClass::getNumPorts() {
+      return getPortTypesAttr().size();
+    }
+
+    size_t $cppClass::getNumInputPorts() {
+      size_t count = 0;
+      for (unsigned i = 0, e = getNumPorts(); i < e; ++i)
+        if (getPortDirection(i) == Direction::In)
+          ++count;
+      return count;
+    }
+
+    size_t $cppClass::getNumOutputPorts() {
+      size_t count = 0;
+      for (unsigned i = 0, e = getNumPorts(); i < e; ++i)
+        if (getPortDirection(i) == Direction::Out)
+          ++count;
+      return count;
+    }
+
+    size_t $cppClass::getPortIdForInputId(size_t idx) {
+      for (unsigned i = 0, e = getNumPorts(); i < e; ++i)
+        if (getPortDirection(i) == Direction::In) {
+          if (!idx)
+            return i;
+          --idx;
+        }
+      assert(0 && "Out of bounds input port id");
+      return ~0ULL;
+    }
+
+    size_t $cppClass::getPortIdForOutputId(size_t idx) {
+      for (unsigned i = 0, e = getNumPorts(); i < e; ++i)
+        if (getPortDirection(i) == Direction::Out) {
+          if (!idx)
+            return i;
+          --idx;
+        }
+      assert(0 && "Out of bounds input port id");
+      return ~0ULL;
     }
   }];
 
@@ -107,6 +143,7 @@ def FModuleOp : FIRRTLModuleLike<"module", [SingleBlock, NoTerminator]> {
   }];
   let arguments =
             (ins ConventionAttr:$convention,
+                 ArrayRefAttr:$portLocations,
                  DefaultValuedAttr<AnnotationArrayAttr, "{}">:$annotations);
 
   let results = (outs);
@@ -162,10 +199,11 @@ def FExtModuleOp : FIRRTLModuleLike<"extmodule"> {
   let arguments = (ins
                    OptionalAttr<StrAttr>:$defname,
                    ConventionAttr:$convention,
+                   ArrayRefAttr:$portLocations,
                    ParamDeclArrayAttr:$parameters,
                    DefaultValuedAttr<AnnotationArrayAttr,
                    "ArrayAttr()">:$annotations,
-                   DefaultValuedAttr<ArrayAttr, "{}">:$internalPaths
+                   OptionalAttr<InternalPathArrayAttr>:$internalPaths
                   );
   let results = (outs);
   let regions = (region AnyRegion:$body);
@@ -197,10 +235,11 @@ def FIntModuleOp : FIRRTLModuleLike<"intmodule"> {
   }];
   let arguments = (ins
                    OptionalAttr<StrAttr>:$intrinsic,
+                   ArrayRefAttr:$portLocations,
                    ParamDeclArrayAttr:$parameters,
                    DefaultValuedAttr<AnnotationArrayAttr,
                    "ArrayAttr()">:$annotations,
-                   DefaultValuedAttr<ArrayAttr, "{}">:$internalPaths
+                   OptionalAttr<InternalPathArrayAttr>:$internalPaths
                   );
   let results = (outs);
   let regions = (region AnyRegion:$body);
@@ -238,7 +277,9 @@ def FMemModuleOp : FIRRTLModuleLike<"memmodule"> {
     (ins UI32Attr:$numReadPorts, UI32Attr:$numWritePorts,
          UI32Attr:$numReadWritePorts, UI32Attr:$dataWidth, UI32Attr:$maskBits,
          UI32Attr:$readLatency, UI32Attr:$writeLatency, UI64Attr:$depth,
-         ArrayAttr:$extraPorts, AnnotationArrayAttr:$annotations);
+         ArrayAttr:$extraPorts,
+         ArrayRefAttr:$portLocations,
+         AnnotationArrayAttr:$annotations);
   let results = (outs);
   let regions = (region AnyRegion:$body);
 
@@ -268,8 +309,9 @@ def ClassOp : FIRRTLModuleLike<"class", [
   DeclareOpInterfaceMethods<FModuleLike, [
     // Class Ops do not support port annotations.
     // Override this method to return an empty array attr.
-    "getPortAnnotationsAttr"]>
-]> {
+    "getPortAnnotationsAttr"]>,
+  DeclareOpInterfaceMethods<ClassLike>,
+  DeclareOpInterfaceMethods<Symbol, ["canDiscardOnUseEmpty"]>]> {
   let summary = "FIRRTL Class";
   let description = [{
     The "firrtl.class" operation defines a class of property-only objects,
@@ -316,14 +358,47 @@ def ClassOp : FIRRTLModuleLike<"class", [
     void getAsmBlockArgumentNames(mlir::Region &region,
                                   mlir::OpAsmSetValueNameFn setNameFn);
     ArrayAttr getParameters();
-
-    /// Verify that the given type agrees with this class.
-    LogicalResult verifyType(
-      ClassType type, function_ref<InFlightDiagnostic()> emitError);
-
-    /// Get the type for instances of this class.
-    ClassType getInstanceType();
   }];
+}
+
+def ExtClassOp : FIRRTLModuleLike<"extclass", [
+  DeclareOpInterfaceMethods<FModuleLike, [
+    // Class Ops do not support port annotations.
+    // Override this method to return an empty array attr.
+    "getPortAnnotationsAttr"]>,
+  DeclareOpInterfaceMethods<ClassLike>,
+  DeclareOpInterfaceMethods<Symbol, ["canDiscardOnUseEmpty"]>]> {
+  let summary = "FIRRTL external class";
+  let description = [{
+    The "firrtl.extclass" operation represents a reference to an external
+    firrtl class, and includes a given name, as well as a list of ports.
+    Just as usual firrtl.class definitions, An ext.class may only have property
+    ports.
+
+    example:
+    ```mlir
+    firrtl.extclass @MyImportedClass(in in_str: !firrtl.string, out out_str: !firrtl.string)
+    ```
+  }];
+  let arguments = (ins SymbolNameAttr:$sym_name, APIntAttr:$portDirections,
+                       ArrayRefAttr:$portNames, ArrayRefAttr:$portTypes,
+                       ArrayRefAttr:$portSyms, ArrayRefAttr:$portLocations);
+  let results = (outs);
+  let regions = (region AnyRegion:$body);
+  let skipDefaultBuilders = 1;
+  let builders = [
+    OpBuilder<(ins
+      "StringAttr":$name,
+      "ArrayRef<PortInfo>":$ports
+    )>
+  ];
+  let extraModuleClassDeclaration = [{
+    void getAsmBlockArgumentNames(mlir::Region &region,
+                                  mlir::OpAsmSetValueNameFn setNameFn);
+
+    ArrayAttr getParameters();
+  }];
+  let hasCustomAssemblyFormat = 1;
 }
 
 def GroupDeclOp : FIRRTLOp<

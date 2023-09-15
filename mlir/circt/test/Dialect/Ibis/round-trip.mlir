@@ -1,73 +1,115 @@
 // RUN: circt-opt %s | circt-opt | FileCheck %s
 
-// CHECK-LABEL:  ibis.class @A {
-// CHECK-NEXT:    %0 = ibis.this @A 
-// CHECK-NEXT:    ibis.port.input @A_in : i1
-// CHECK-NEXT:    ibis.port.output @A_out : i1
+// CHECK-LABEL:  ibis.class @HighLevel {
+// CHECK-NEXT:    %this = ibis.this @HighLevel 
+// CHECK-NEXT:    ibis.var @single : memref<i32>
+// CHECK-NEXT:    ibis.var @array : memref<10xi32>
+// CHECK-NEXT:    ibis.method @foo() {
+// CHECK-NEXT:      %parent = ibis.path [#ibis.step<parent : !ibis.scoperef<@HighLevel>> : !ibis.scoperef<@HighLevel>]
+// CHECK-NEXT:      %single = ibis.get_var %parent, @single : !ibis.scoperef<@HighLevel> -> memref<i32>
+// CHECK-NEXT:      %array = ibis.get_var %parent, @array : !ibis.scoperef<@HighLevel> -> memref<10xi32>
+// CHECK-NEXT:      %alloca = memref.alloca() : memref<i32>
+// CHECK-NEXT:      %c32_i32 = hw.constant 32 : i32
+// CHECK-NEXT:      %0:2 = ibis.sblock (%arg0 : i32 = %c32_i32) -> (i32, i32) attributes {schedule = 1 : i64}{
+// CHECK-NEXT:        %1 = memref.load %alloca[] : memref<i32>
+// CHECK-NEXT:        memref.store %arg0, %alloca[] : memref<i32>
+// CHECK-NEXT:        ibis.sblock.return %1, %1 : i32, i32
+// CHECK-NEXT:      }
+// CHECK-NEXT:      ibis.return
+// CHECK-NEXT:    }
 // CHECK-NEXT:  }
 
-// CHECK-LABEL:  ibis.class @C {
-// CHECK-NEXT:    %0 = ibis.this @C 
-// CHECK-NEXT:    ibis.port.input @C_in : i1
-// CHECK-NEXT:    ibis.port.output @C_out : i1
-// CHECK-NEXT:    %1 = ibis.instance @a, @A 
-// CHECK-NEXT:    %2 = ibis.get_parent_of_ref %1 : !ibis.scoperef<@A> -> !ibis.scoperef
-// CHECK-NEXT:    %3 = ibis.get_instance_in_ref @a : @A in %0 : !ibis.scoperef<@C> 
-// CHECK-NEXT:    %4 = ibis.get_port %1, @A_in : !ibis.scoperef<@A> -> !ibis.portref<in i1>
-// CHECK-NEXT:    %5 = ibis.get_instance_in_ref @a : @A in %2 : !ibis.scoperef 
+ibis.class @HighLevel {
+  %this = ibis.this @HighLevel
+  ibis.var @single : memref<i32>
+  ibis.var @array : memref<10xi32>
+
+  ibis.method @foo()  {
+    %parent = ibis.path [
+      #ibis.step<parent : !ibis.scoperef<@HighLevel>>
+    ]
+    %single = ibis.get_var %parent, @single : !ibis.scoperef<@HighLevel> -> memref<i32>
+    %array = ibis.get_var %parent, @array : !ibis.scoperef<@HighLevel> -> memref<10xi32>
+    %local = memref.alloca() : memref<i32>
+    %c32 = hw.constant 32 : i32
+    %out1, %out2 = ibis.sblock(%arg : i32 = %c32) -> (i32, i32) attributes {schedule = 1} {
+      %v = memref.load %local[] : memref<i32>
+      memref.store %arg, %local[] : memref<i32>
+      ibis.sblock.return %v, %v : i32, i32
+    }
+    ibis.return
+  }
+}
+
+
+// CHECK-LABEL:  ibis.class @A {
+// CHECK-NEXT:    %this = ibis.this @A 
+// CHECK-NEXT:    %in = ibis.port.input @in : i1
+// CHECK-NEXT:    %out = ibis.port.output @out : i1
+// CHECK-NEXT:  }
+
+// CHECK-LABEL:  ibis.class @LowLevel {
+// CHECK-NEXT:    %this = ibis.this @LowLevel 
+// CHECK-NEXT:    %LowLevel_in = ibis.port.input @LowLevel_in : i1
+// CHECK-NEXT:    %LowLevel_out = ibis.port.output @LowLevel_out : i1
+// CHECK-NEXT:    %in_wire, %in_wire.out = ibis.wire.input @in_wire : i1
+// CHECK-NEXT:    %true = hw.constant true
+// CHECK-NEXT:    %out_wire = ibis.wire.output @out_wire, %true : i1
+// CHECK-NEXT:    %a = ibis.instance @a, @A 
 // CHECK-NEXT:    ibis.container @D {
-// CHECK-NEXT:      %6 = ibis.this @D 
-// CHECK-NEXT:      %7 = ibis.get_parent_of_ref %6 : !ibis.scoperef<@D> -> !ibis.scoperef<@C>
-// CHECK-NEXT:      %8 = ibis.get_port %7, @C_in : !ibis.scoperef<@C> -> !ibis.portref<in i1>
-// CHECK-NEXT:      %9 = ibis.get_port %7, @C_out : !ibis.scoperef<@C> -> !ibis.portref<out i1>
-// CHECK-NEXT:      %true = hw.constant true
-// CHECK-NEXT:      ibis.port.write %8, %true : i1
-// CHECK-NEXT:      %10 = ibis.port.read %9 : !ibis.portref<out i1>
-// CHECK-NEXT:      %11 = ibis.get_instance_in_ref @a : @A in %7 : !ibis.scoperef<@C> 
-// CHECK-NEXT:      %12 = ibis.get_port %11, @A_in : !ibis.scoperef<@A> -> !ibis.portref<in i1>
-// CHECK-NEXT:      %13 = ibis.get_port %11, @A_out : !ibis.scoperef<@A> -> !ibis.portref<out i1>
-// CHECK-NEXT:      ibis.port.write %12, %10 : i1
-// CHECK-NEXT:      %14 = ibis.port.read %13 : !ibis.portref<out i1>
+// CHECK-NEXT:      %this_0 = ibis.this @D 
+// CHECK-NEXT:      %parent = ibis.path [#ibis.step<parent : !ibis.scoperef<@LowLevel>> : !ibis.scoperef<@LowLevel>]
+// CHECK-NEXT:      %parent.LowLevel_in.ref = ibis.get_port %parent, @LowLevel_in : !ibis.scoperef<@LowLevel> -> !ibis.portref<in i1>
+// CHECK-NEXT:      %parent.LowLevel_out.ref = ibis.get_port %parent, @LowLevel_out : !ibis.scoperef<@LowLevel> -> !ibis.portref<out i1>
+// CHECK-NEXT:      %true_1 = hw.constant true
+// CHECK-NEXT:      ibis.port.write %parent.LowLevel_in.ref, %true_1 : !ibis.portref<in i1>
+// CHECK-NEXT:      %parent.LowLevel_out.ref.val = ibis.port.read %parent.LowLevel_out.ref : !ibis.portref<out i1>
+// CHECK-NEXT:      %parent.a = ibis.path [#ibis.step<parent : !ibis.scoperef> : !ibis.scoperef, #ibis.step<child, @a : !ibis.scoperef<@A>> : !ibis.scoperef<@A>]
+// CHECK-NEXT:      %parent.a.in.ref = ibis.get_port %parent.a, @in : !ibis.scoperef<@A> -> !ibis.portref<in i1>
+// CHECK-NEXT:      %parent.a.out.ref = ibis.get_port %parent.a, @out : !ibis.scoperef<@A> -> !ibis.portref<out i1>
+// CHECK-NEXT:      ibis.port.write %parent.a.in.ref, %parent.LowLevel_out.ref.val : !ibis.portref<in i1>
+// CHECK-NEXT:      %parent.a.out.ref.val = ibis.port.read %parent.a.out.ref : !ibis.portref<out i1>
 // CHECK-NEXT:    }
 // CHECK-NEXT:  }
 
 ibis.class @A {
   %this = ibis.this @A
-  ibis.port.input @A_in : i1
-  ibis.port.output @A_out : i1
+  ibis.port.input @in : i1
+  ibis.port.output @out : i1
 }
 
-ibis.class @C {
-  %this = ibis.this @C
-  ibis.port.input @C_in : i1
-  ibis.port.output @C_out : i1
+ibis.class @LowLevel {
+  %this = ibis.this @LowLevel
+  ibis.port.input @LowLevel_in : i1
+  ibis.port.output @LowLevel_out : i1
+
+  %in_wire, %in_wire.val = ibis.wire.input @in_wire : i1
+  %true = hw.constant 1 : i1
+  %out_wire = ibis.wire.output @out_wire, %true : i1
 
   // Instantiation
   %a = ibis.instance @a, @A
 
-  // Test get parent/child
-  %parent = ibis.get_parent_of_ref %a : !ibis.scoperef<@A> -> !ibis.scoperef
-  %child = ibis.get_instance_in_ref @a : @A in %this : !ibis.scoperef<@C>
-  %a_in_cp = ibis.get_port %a, @A_in : !ibis.scoperef<@A> -> !ibis.portref<in i1>
-
-  // Test siblings
-  %sibling = ibis.get_instance_in_ref @a : @A in %parent : !ibis.scoperef
-
   ibis.container @D {
     %this_d = ibis.this @D
-    %parent_C = ibis.get_parent_of_ref %this_d : !ibis.scoperef<@D> -> !ibis.scoperef<@C>
+    %parent_C = ibis.path [
+      #ibis.step<parent : !ibis.scoperef<@LowLevel>>
+    ]
     // Test local read/writes
-    %c_in_p = ibis.get_port %parent_C, @C_in : !ibis.scoperef<@C> -> !ibis.portref<in i1>
-    %c_out_p = ibis.get_port %parent_C, @C_out : !ibis.scoperef<@C> -> !ibis.portref<out i1>
-    %true = hw.constant true
-    ibis.port.write %c_in_p, %true : i1
-    %c_out = ibis.port.read %c_out_p : !ibis.portref<out i1>
+    %LowLevel_in_p = ibis.get_port %parent_C, @LowLevel_in : !ibis.scoperef<@LowLevel> -> !ibis.portref<in i1>
+    %LowLevel_out_p = ibis.get_port %parent_C, @LowLevel_out : !ibis.scoperef<@LowLevel> -> !ibis.portref<out i1>
+    %t = hw.constant true
+    ibis.port.write %LowLevel_in_p, %t : !ibis.portref<in i1>
+    %LowLevel_out = ibis.port.read %LowLevel_out_p : !ibis.portref<out i1>
 
     // Test cross-container read/writes
-    %a_in_parent = ibis.get_instance_in_ref @a : @A in %parent_C : !ibis.scoperef<@C>
-    %a_in_p = ibis.get_port %a_in_parent, @A_in : !ibis.scoperef<@A> -> !ibis.portref<in i1>
-    %a_out_p = ibis.get_port %a_in_parent, @A_out : !ibis.scoperef<@A> -> !ibis.portref<out i1>
-    ibis.port.write %a_in_p, %c_out : i1
-    %a_out = ibis.port.read %a_out_p : !ibis.portref<out i1>
+    %A.in_parent = ibis.path [
+      #ibis.step<parent : !ibis.scoperef>,
+      #ibis.step<child , @a : !ibis.scoperef<@A>>
+    ]
+    %A.in_p = ibis.get_port %A.in_parent, @in : !ibis.scoperef<@A> -> !ibis.portref<in i1>
+    %A.out_p = ibis.get_port %A.in_parent, @out : !ibis.scoperef<@A> -> !ibis.portref<out i1>
+    ibis.port.write %A.in_p, %LowLevel_out : !ibis.portref<in i1>
+    %A.out = ibis.port.read %A.out_p : !ibis.portref<out i1>
   }
 }

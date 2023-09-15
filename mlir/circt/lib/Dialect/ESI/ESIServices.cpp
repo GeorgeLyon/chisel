@@ -524,9 +524,9 @@ ESIConnectServicesPass::surfaceReqs(hw::HWMutableModuleLike mod,
   Block *body = &mod->getRegion(0).front();
 
   // Track initial operand/result counts and the new IO.
-  unsigned origNumInputs = mod.getNumInputs();
+  unsigned origNumInputs = mod.getNumInputPorts();
   SmallVector<std::pair<unsigned, hw::PortInfo>> newInputs;
-  unsigned origNumOutputs = mod.getNumOutputs();
+  unsigned origNumOutputs = mod.getNumOutputPorts();
   SmallVector<std::pair<mlir::StringAttr, Value>> newOutputs;
 
   // Assemble a port name from an array.
@@ -615,13 +615,16 @@ ESIConnectServicesPass::surfaceReqs(hw::HWMutableModuleLike mod,
     // Create a replacement instance of the same operation type.
     SmallVector<NamedAttribute> newAttrs;
     for (auto attr : inst->getAttrs()) {
-      if (attr.getName() == argsAttrName)
-        newAttrs.push_back(b.getNamedAttr(argsAttrName, mod.getInputNames()));
-      else if (attr.getName() == resultsAttrName)
+      if (attr.getName() == argsAttrName) {
+        auto names = mod.getInputNames();
+        newAttrs.push_back(b.getNamedAttr(argsAttrName, b.getArrayAttr(names)));
+      } else if (attr.getName() == resultsAttrName) {
+        auto names = mod.getOutputNames();
         newAttrs.push_back(
-            b.getNamedAttr(resultsAttrName, mod.getOutputNames()));
-      else
+            b.getNamedAttr(resultsAttrName, b.getArrayAttr(names)));
+      } else {
         newAttrs.push_back(attr);
+      }
     }
     auto *newInst = b.insert(Operation::create(
         inst->getLoc(), inst->getName(), newResultTypes, newOperands,

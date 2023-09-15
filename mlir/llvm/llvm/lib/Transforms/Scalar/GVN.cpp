@@ -1368,7 +1368,7 @@ LoadInst *GVNPass::findLoadToHoistIntoPred(BasicBlock *Pred, BasicBlock *LoadBB,
                                            LoadInst *Load) {
   // For simplicity we handle a Pred has 2 successors only.
   auto *Term = Pred->getTerminator();
-  if (Term->getNumSuccessors() != 2 || Term->isExceptionalTerminator())
+  if (Term->getNumSuccessors() != 2 || Term->isSpecialTerminator())
     return nullptr;
   auto *SuccBB = Term->getSuccessor(0);
   if (SuccBB == LoadBB)
@@ -1416,16 +1416,8 @@ void GVNPass::eliminatePartiallyRedundantLoad(
                      Load->getSyncScopeID(), UnavailableBlock->getTerminator());
     NewLoad->setDebugLoc(Load->getDebugLoc());
     if (MSSAU) {
-      auto *MSSA = MSSAU->getMemorySSA();
-      // Get the defining access of the original load or use the load if it is a
-      // MemoryDef (e.g. because it is volatile). The inserted loads are
-      // guaranteed to load from the same definition.
-      auto *LoadAcc = MSSA->getMemoryAccess(Load);
-      auto *DefiningAcc =
-          isa<MemoryDef>(LoadAcc) ? LoadAcc : LoadAcc->getDefiningAccess();
       auto *NewAccess = MSSAU->createMemoryAccessInBB(
-          NewLoad, DefiningAcc, NewLoad->getParent(),
-          MemorySSA::BeforeTerminator);
+          NewLoad, nullptr, NewLoad->getParent(), MemorySSA::BeforeTerminator);
       if (auto *NewDef = dyn_cast<MemoryDef>(NewAccess))
         MSSAU->insertDef(NewDef, /*RenameUses=*/true);
       else
@@ -2023,14 +2015,12 @@ bool GVNPass::processAssumeIntrinsic(AssumeInst *IntrinsicI) {
           }
         }
 
-        // This added store is to null, so it will never executed and we can
-        // just use the LiveOnEntry def as defining access.
         auto *NewDef =
             FirstNonDom ? MSSAU->createMemoryAccessBefore(
-                              NewS, MSSAU->getMemorySSA()->getLiveOnEntryDef(),
+                              NewS, nullptr,
                               const_cast<MemoryUseOrDef *>(FirstNonDom))
                         : MSSAU->createMemoryAccessInBB(
-                              NewS, MSSAU->getMemorySSA()->getLiveOnEntryDef(),
+                              NewS, nullptr,
                               NewS->getParent(), MemorySSA::BeforeTerminator);
 
         MSSAU->insertDef(cast<MemoryDef>(NewDef), /*RenameUses=*/false);
@@ -2997,9 +2987,9 @@ bool GVNPass::performScalarPRE(Instruction *CurInst) {
   ++NumGVNPRE;
 
   // Create a PHI to make the value available in this block.
-  PHINode *Phi =
-      PHINode::Create(CurInst->getType(), predMap.size(),
-                      CurInst->getName() + ".pre-phi", &CurrentBlock->front());
+  PHINode *Phi = PHINode::Create(CurInst->getType(), predMap.size(),
+                                 CurInst->getName() + ".pre-phi");
+  Phi->insertBefore(CurrentBlock->begin());
   for (unsigned i = 0, e = predMap.size(); i != e; ++i) {
     if (Value *V = predMap[i].first) {
       // If we use an existing value in this phi, we have to patch the original

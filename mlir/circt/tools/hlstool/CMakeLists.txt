@@ -18,10 +18,20 @@ target_link_libraries(hlstool
   CIRCTHW
   CIRCTHWTransforms
   CIRCTSeq
+  CIRCTSeqToSV
   CIRCTSeqTransforms
-  CIRCTStandardToHandshake
+  CIRCTCFToHandshake
   CIRCTSV
   CIRCTSVTransforms
+  CIRCTSCFToCalyx
+  CIRCTCalyx
+  CIRCTCalyxNative
+  CIRCTCalyxTransforms
+  CIRCTCalyxToHW
+  CIRCTCalyxToFSM
+  CIRCTFSM
+  CIRCTFSMTransforms
+  CIRCTFSMToSV
   CIRCTTransforms
 
   MLIRIR

@@ -319,7 +319,8 @@ void ExtractInstancesPass::collectAnnos() {
   LLVM_DEBUG(llvm::dbgs() << "Marking DUT hierarchy\n");
   SmallVector<InstanceGraphNode *> worklist;
   for (Operation *op : dutModules)
-    worklist.push_back(instanceGraph->lookup(cast<hw::HWModuleLike>(op)));
+    worklist.push_back(
+        instanceGraph->lookup(cast<igraph::ModuleOpInterface>(op)));
   while (!worklist.empty()) {
     auto *module = worklist.pop_back_val();
     dutModuleNames.insert(module->getModule().getModuleNameAttr());
@@ -582,7 +583,7 @@ void ExtractInstancesPass::extractInstances() {
     // the instances of the parent module, and wire the instance ports up to
     // the newly added parent module ports.
     auto *instParentNode =
-        instanceGraph->lookup(cast<hw::HWModuleLike>(*parent));
+        instanceGraph->lookup(cast<igraph::ModuleOpInterface>(*parent));
     for (auto *instRecord : instParentNode->uses()) {
       auto oldParentInst = cast<InstanceOp>(*instRecord->getInstance());
       auto newParent = oldParentInst->getParentOfType<FModuleLike>();
@@ -864,7 +865,8 @@ void ExtractInstancesPass::groupInstances() {
     OpBuilder builder(parentOp);
 
     // Uniquify the wrapper name.
-    wrapperName = circuitNamespace.newName(wrapperName);
+    auto wrapperModuleName = builder.getStringAttr(
+        circuitNamespace.newName(dutPrefix + wrapperName));
     auto wrapperInstName =
         builder.getStringAttr(getModuleNamespace(parent).newName(wrapperName));
 
@@ -916,14 +918,13 @@ void ExtractInstancesPass::groupInstances() {
 
         // The relevant part of the NLA is of the form `Top::bb`, which we want
         // to expand to `Top::wrapperInst` and `Wrapper::bb`.
-        auto wrapperNameAttr = builder.getStringAttr(wrapperName);
         auto ref1 =
             InnerRefAttr::get(parent.getModuleNameAttr(), wrapperInstName);
         Attribute ref2;
         if (auto innerRef = dyn_cast<InnerRefAttr>(nlaPath[nlaIdx]))
-          ref2 = InnerRefAttr::get(wrapperNameAttr, innerRef.getName());
+          ref2 = InnerRefAttr::get(wrapperModuleName, innerRef.getName());
         else
-          ref2 = FlatSymbolRefAttr::get(wrapperNameAttr);
+          ref2 = FlatSymbolRefAttr::get(wrapperModuleName);
         LLVM_DEBUG(llvm::dbgs() << "    - Expanding " << nlaPath[nlaIdx]
                                 << " to (" << ref1 << ", " << ref2 << ")\n");
         nlaPath[nlaIdx] = ref1;
@@ -934,13 +935,13 @@ void ExtractInstancesPass::groupInstances() {
         nla.setNamepathAttr(builder.getArrayAttr(nlaPath));
         LLVM_DEBUG(llvm::dbgs() << "    - Modified to " << nla << "\n");
         // Add the NLA to the wrapper module.
-        nlaTable.addNLAtoModule(nla, wrapperNameAttr);
+        nlaTable.addNLAtoModule(nla, wrapperModuleName);
       }
     }
 
     // Create the wrapper module.
     auto wrapper = builder.create<FModuleOp>(
-        builder.getUnknownLoc(), builder.getStringAttr(dutPrefix + wrapperName),
+        builder.getUnknownLoc(), wrapperModuleName,
         ConventionAttr::get(builder.getContext(), Convention::Internal), ports);
     SymbolTable::setSymbolVisibility(wrapper, SymbolTable::Visibility::Private);
 

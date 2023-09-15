@@ -216,6 +216,19 @@ diff_helper "$SNAPSHOTS_DIR" "source" "input" | \
 # At this point, the "output" snapshot should represent the managed sources we want in the repo. The last thing to do is to sync the state back into the repo and update the metadata.
 echo "▸ Writing output snapshot back to repo…"
 
+# If there are case differences between the output snapshot and the repo, rsync will override them but git will not recognize that the file has been renamed. To work around this, we manually rename the files before rsyncing.
+(
+  cd "$OUTPUT_SNAPSHOT_DIR"
+  find llvm circt -type f -print0 | while IFS= read -r -d '' SNAPSHOT_FILE; do
+    SNAPSHOT_FILENAME=$(basename "$SNAPSHOT_FILE")
+    SNAPSHOT_FILEPATH=$(dirname "$SNAPSHOT_FILE")
+    REPO_FILE=$(cd "$MLIR_DIR"; find "$SNAPSHOT_FILEPATH" -depth 1 -iname "$SNAPSHOT_FILENAME" 2> /dev/null || true)
+    if [ -n "$REPO_FILE" ] && [ "$SNAPSHOT_FILENAME" != "$(basename "$REPO_FILE")" ]; then
+      git -C "$REPO_DIR" mv "mlir/$REPO_FILE" "mlir/$SNAPSHOT_FILE"
+    fi
+  done
+)
+
 # Sync the output snapshot back into the repo
 rsync -avqt --delete{,-excluded} \
   "$OUTPUT_SNAPSHOT_DIR/llvm/" "$MLIR_DIR/llvm"

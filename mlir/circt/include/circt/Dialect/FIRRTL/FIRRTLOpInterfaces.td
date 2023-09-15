@@ -16,10 +16,11 @@
 include "mlir/IR/OpBase.td"
 include "circt/Dialect/HW/HWOpInterfaces.td"
 
-def FModuleLike : OpInterface<"FModuleLike", [HWModuleLike]> {
+def FModuleLike : OpInterface<"FModuleLike", [Symbol, SymboledPortList, InstanceGraphModuleOpInterface]> {
   let cppNamespace = "circt::firrtl";
   let description = "Provide common module information.";
   let methods = [
+
     //===------------------------------------------------------------------===//
     // Parameters
     //===------------------------------------------------------------------===//
@@ -340,13 +341,36 @@ def FModuleLike : OpInterface<"FModuleLike", [HWModuleLike]> {
         ConcreteOp::template hasTrait<::mlir::SymbolOpInterface::Trait>(),
         "expected operation to be a symbol");
     static_assert(
-        ConcreteOp::template hasTrait<::circt::hw::HWModuleLike::Trait>(),
-        "expected operation to be also be a hardware module");
-    static_assert(
         ConcreteOp::template hasTrait<OpTrait::InnerSymbolTable>(),
         "expected operation to be an inner symbol table");
     return verifyModuleLikeOpInterface(cast<::circt::firrtl::FModuleLike>(op));
   }];
+}
+
+def ClassLike : OpInterface<"ClassLike", [FModuleLike]> {
+  let cppNamespace = "circt::firrtl";
+  let description = "Provide common class information.";
+  let methods = [
+    InterfaceMethod<
+      "Get the type for instances of this class",
+      "ClassType", "getInstanceType", (ins),
+      /*methodBody=*/[{}],
+      /*defaultImplementation=*/[{
+        return detail::getInstanceTypeForClassLike($_op);
+      }]
+    >,
+    InterfaceMethod<
+      "Verify that the given type agrees with this class",
+      "LogicalResult", "verifyType", (ins
+        "::circt::firrtl::ClassType":$type,
+        "::llvm::function_ref<::mlir::InFlightDiagnostic()>":$emitError
+      ),
+      /*methodBody=*/[{}],
+      /*defaultImplementation=*/[{
+        return detail::verifyTypeAgainstClassLike($_op, type, emitError);
+      }]
+    >
+  ];
 }
 
 def FConnectLike : OpInterface<"FConnectLike"> {

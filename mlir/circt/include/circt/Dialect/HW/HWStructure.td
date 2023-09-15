@@ -17,7 +17,7 @@ include "circt/Dialect/HW/HWAttributes.td"
 include "circt/Dialect/HW/HWDialect.td"
 include "circt/Dialect/HW/HWOpInterfaces.td"
 include "circt/Dialect/HW/HWTypes.td"
-include "mlir/IR/FunctionInterfaces.td"
+include "mlir/Interfaces/FunctionInterfaces.td"
 include "mlir/IR/OpAsmInterface.td"
 include "mlir/IR/OpBase.td"
 include "mlir/IR/RegionKindInterface.td"
@@ -30,9 +30,10 @@ include "mlir/Interfaces/SideEffectInterfaces.td"
 class HWModuleOpBase<string mnemonic, list<Trait> traits = []> :
     HWOp<mnemonic, traits # [
       DeclareOpInterfaceMethods<PortList>,
+      DeclareOpInterfaceMethods<SymboledPortList>,
       DeclareOpInterfaceMethods<HWModuleLike>,
       DeclareOpInterfaceMethods<HWMutableModuleLike>,
-      FunctionOpInterface, Symbol,
+      Symbol, InnerSymbolTable,
       OpAsmOpInterface, HasParent<"mlir::ModuleOp">]> {
   /// Additional class declarations inside the module op.
   code extraModuleClassDeclaration = ?;
@@ -51,37 +52,25 @@ class HWModuleOpBase<string mnemonic, list<Trait> traits = []> :
       ArrayRef<unsigned> eraseOutputs
     );
 
-    /// Attribute name for port symbols.
-    static StringRef getPortSymbolAttrName() {
-      return "hw.exportPort";
-    }
-
     void setPortSymbolAttr(size_t portIndex, ::circt::hw::InnerSymAttr sym);
 
     StringAttr getArgName(size_t index) {
-      return dyn_cast<StringAttr>(getArgNames()[index]);
+      return getHWModuleType().getInputNameAttr(index);
     }
+
   }];
 
   /// Additional class definitions inside the module op.
   code extraModuleClassDefinition = [{}];
 
   let extraClassDefinition = extraModuleClassDefinition # [{
-    size_t $cppClass::getNumPorts() {
-      // This is wildly inefficient
-      return getPortList().size();
+
+    ModuleType $cppClass::getHWModuleType() {
+      return getModuleType();
     }
 
     ::circt::hw::InnerSymAttr $cppClass::getPortSymbolAttr(size_t portIndex) {
-      DictionaryAttr portAttrs;
-      if (portIndex < getNumInputs()) {
-         portAttrs = ::mlir::function_interface_impl::getArgAttrDict(*this,
-                                                                     portIndex);
-      } else {
-        portIndex -= getNumInputs();
-        portAttrs = ::mlir::function_interface_impl::getResultAttrDict(
-            *this, portIndex);
-      }
+      DictionaryAttr portAttrs = cast_or_null<DictionaryAttr>(getPortAttrs(portIndex));
       if (portAttrs)
         return portAttrs.getAs<::circt::hw::InnerSymAttr>(
           getPortSymbolAttrName());
@@ -90,32 +79,51 @@ class HWModuleOpBase<string mnemonic, list<Trait> traits = []> :
 
     void $cppClass::setPortSymbolAttr(size_t portIndex, ::circt::hw::InnerSymAttr sym) {
       auto portSymAttr = StringAttr::get(getContext(), getPortSymbolAttrName());
-      if (portIndex < getNumInputs()) {
-        if (sym)
-          ::mlir::function_interface_impl::setArgAttr(*this, portIndex,
-                                                      portSymAttr, sym);
-        else
-          ::mlir::function_interface_impl::removeArgAttr(*this, portIndex,
-                                                         portSymAttr);
-        return;
-      }
-      if (sym)
-        ::mlir::function_interface_impl::setResultAttr(
-            *this, portIndex - getNumInputs(), portSymAttr, sym);
-      else
-        ::mlir::function_interface_impl::removeResultAttr(
-            *this, portIndex - getNumInputs(), portSymAttr);
+      setPortAttr(portIndex, portSymAttr, sym);
     }
+
+    size_t $cppClass::getNumPorts() {
+      auto modty = getHWModuleType();
+      return modty.getNumPorts();
+    }
+
+    size_t $cppClass::getNumInputPorts() {
+      auto modty = getHWModuleType();
+      return modty.getNumInputs();
+    }
+
+    size_t $cppClass::getNumOutputPorts() {
+      auto modty = getHWModuleType();
+      return modty.getNumOutputs();
+    }
+
+    size_t $cppClass::getPortIdForInputId(size_t idx) {
+      auto modty = getHWModuleType();
+      return modty.getPortIdForInputId(idx);
+    }
+
+    size_t $cppClass::getPortIdForOutputId(size_t idx) {
+      auto modty = getHWModuleType();
+      return modty.getPortIdForOutputId(idx);
+    }
+
+    ModulePortInfo $cppClass::getPortList() {
+      return ::getPortList(*this);
+    }
+
   }];
 
 }
 
-def HWTestModuleOp : HWOp<"testmodule", [Symbol, PortList,
+def HWTestModuleOp : HWOp<"testmodule", [Symbol,
+                                         DeclareOpInterfaceMethods<PortList>,
+                                         DeclareOpInterfaceMethods<SymboledPortList>,
                                          OpAsmOpInterface, 
                                          HasParent<"mlir::ModuleOp">, 
                                          IsolatedFromAbove,
                                          SingleBlockImplicitTerminator<"OutputOp">]> {
-  let arguments = (ins TypeAttrOf<ModuleType>:$module_type,
+  let arguments = (ins SymbolNameAttr:$sym_name,
+                       TypeAttrOf<ModuleType>:$module_type,
                        OptionalAttr<DictArrayAttr>:$port_attrs,
                        OptionalAttr<LocationArrayAttr>:$port_locs,
                        ParamDeclArrayAttr:$parameters,
@@ -129,11 +137,6 @@ def HWTestModuleOp : HWOp<"testmodule", [Symbol, PortList,
                                   mlir::OpAsmSetValueNameFn setNameFn);
 
     Block *getBodyBlock() { return &getRegion().front(); }
-
-    //===------------------------------------------------------------------===//
-    // PortList Methods
-    //===------------------------------------------------------------------===//
-    ::circt::hw::ModulePortInfo getPortList();
   }];
 
 }
@@ -147,13 +150,10 @@ def HWModuleOp : HWModuleOpBase<"module",
     name, a list of ports, a list of parameters, and a body that represents the
     connections within the module.
   }];
-  let arguments = (ins TypeAttrOf<FunctionType>:$function_type,
-                       OptionalAttr<DictArrayAttr>:$arg_attrs,
-                       OptionalAttr<DictArrayAttr>:$res_attrs,
-                       StrArrayAttr:$argNames,
-                       StrArrayAttr:$resultNames,
-                       LocationArrayAttr:$argLocs,
-                       LocationArrayAttr:$resultLocs,
+  let arguments = (ins SymbolNameAttr:$sym_name,
+                       TypeAttrOf<ModuleType>:$module_type,
+                       DictArrayAttr:$per_port_attrs,
+                       LocationArrayAttr:$portLocs,
                        ParamDeclArrayAttr:$parameters,
                        StrAttr:$comment);
   let results = (outs);
@@ -178,35 +178,20 @@ def HWModuleOp : HWModuleOpBase<"module",
   ];
 
   let extraModuleClassDeclaration = [{
-    using mlir::detail::FunctionOpInterfaceTrait<HWModuleOp>::front;
-    using mlir::detail::FunctionOpInterfaceTrait<HWModuleOp>::getFunctionBody;
 
     // Implement RegionKindInterface.
     static RegionKind getRegionKind(unsigned index) { return RegionKind::Graph;}
-
-    /// Returns the number of in or inout ports.
-    size_t getNumInOrInoutPorts() { return getArgumentTypes().size(); }
-
-    /// Return the PortInfo for the specified input or inout port.
-    PortInfo getInOrInoutPort(size_t i) {
-      return getModuleInOrInoutPort(*this, i);
-    }
-
-    /// Return the PortInfo for the specified output port.
-    PortInfo getOutputPort(size_t i) {
-      return getModuleOutputPort(*this, i);
-    }
 
     /// Append an input with a given name and type to the port list.
     /// If the name is not unique, a unique name is created and returned.
     std::pair<StringAttr, BlockArgument>
     appendInput(const Twine &name, Type ty) {
-      return insertInput(getNumInOrInoutPorts(), name, ty);
+      return insertInput(getNumInputPorts(), name, ty);
     }
 
     std::pair<StringAttr, BlockArgument>
     appendInput(StringAttr name, Type ty) {
-      return insertInput(getNumInOrInoutPorts(), name.getValue(), ty);
+      return insertInput(getNumInputPorts(), name.getValue(), ty);
     }
 
     /// Prepend an input with a given name and type to the port list.
@@ -235,12 +220,12 @@ def HWModuleOp : HWModuleOpBase<"module",
     /// Append an output with a given name and type to the port list.
     /// If the name is not unique, a unique name is created.
     void appendOutput(StringAttr name, Value value) {
-      return insertOutputs(getResultTypes().size(), {{name, value}});
+      return insertOutputs(getNumOutputPorts(), {{name, value}});
     }
 
     void appendOutput(const Twine &name, Value value) {
       ::mlir::StringAttr nameAttr = ::mlir::StringAttr::get(getContext(), name);
-      return insertOutputs(getResultTypes().size(), {{nameAttr, value}});
+      return insertOutputs(getNumOutputPorts(), {{nameAttr, value}});
     }
 
     /// Prepend an output with a given name and type to the port list.
@@ -260,8 +245,6 @@ def HWModuleOp : HWModuleOpBase<"module",
     void insertOutputs(unsigned index,
                        ArrayRef<std::pair<StringAttr, Value>> outputs);
 
-    Block *getBodyBlock() { return &getFunctionBody().front(); }
-
     // Get the module's symbolic name as StringAttr.
     StringAttr getNameAttr() {
       return (*this)->getAttrOfType<StringAttr>(
@@ -274,22 +257,6 @@ def HWModuleOp : HWModuleOpBase<"module",
     }
     void getAsmBlockArgumentNames(mlir::Region &region,
                                   mlir::OpAsmSetValueNameFn setNameFn);
-
-    /// Returns the argument types of this function.
-    ArrayRef<Type> getArgumentTypes() { return getFunctionType().getInputs(); }
-
-    /// Returns the result types of this function.
-    ArrayRef<Type> getResultTypes() { return getFunctionType().getResults(); }
-
-    /// Verify the type attribute of this function. Returns failure and emits
-    /// an error if the attribute is invalid.
-    LogicalResult verifyType() {
-      auto type = getFunctionTypeAttr().getValue();
-      if (!type.isa<FunctionType>())
-        return emitOpError("requires '" + getFunctionTypeAttrName().getValue() +
-                           "' attribute of function type");
-      return success();
-    }
 
     /// Verifies the body of the function.
     LogicalResult verifyBody();
@@ -310,10 +277,10 @@ def HWModuleExternOp : HWModuleOpBase<"module.extern"> {
     have proper parameterization in the hw.dialect.  We need a way to represent
     parameterized types instead of just concrete types.
   }];
-  let arguments = (ins TypeAttrOf<FunctionType>:$function_type,
-		       OptionalAttr<DictArrayAttr>:$arg_attrs,
-                       OptionalAttr<DictArrayAttr>:$res_attrs,
-                       StrArrayAttr:$argNames, StrArrayAttr:$resultNames,
+  let arguments = (ins SymbolNameAttr:$sym_name,
+                       TypeAttrOf<ModuleType>:$module_type,
+                       DictArrayAttr:$per_port_attrs,
+                       LocationArrayAttr:$portLocs,
                        ParamDeclArrayAttr:$parameters,
                        OptionalAttr<StrAttr>:$verilogName);
   let results = (outs);
@@ -332,16 +299,6 @@ def HWModuleExternOp : HWModuleOpBase<"module.extern"> {
   ];
 
   let extraModuleClassDeclaration = [{
-
-    /// Return the PortInfo for the specified input or inout port.
-    PortInfo getInOrInoutPort(size_t i) {
-      return getModuleInOrInoutPort(*this, i);
-    }
-
-    /// Return the PortInfo for the specified output port.
-    PortInfo getOutputPort(size_t i) {
-      return getModuleOutputPort(*this, i);
-    }
 
     /// Return the name to use for the Verilog module that we're referencing
     /// here.  This is typically the symbol, but can be overridden with the
@@ -369,21 +326,6 @@ def HWModuleExternOp : HWModuleOpBase<"module.extern"> {
     void getAsmBlockArgumentNames(mlir::Region &region,
                                   mlir::OpAsmSetValueNameFn setNameFn);
 
-    /// Returns the argument types of this function.
-    ArrayRef<Type> getArgumentTypes() { return getFunctionType().getInputs(); }
-
-    /// Returns the result types of this function.
-    ArrayRef<Type> getResultTypes() { return getFunctionType().getResults(); }
-
-    /// Verify the type attribute of this function. Returns failure and emits
-    /// an error if the attribute is invalid.
-    LogicalResult verifyType() {
-      auto type = getFunctionTypeAttr().getValue();
-      if (!type.isa<FunctionType>())
-        return emitOpError("requires '" + getFunctionTypeAttrName().getValue() +
-                           "' attribute of function type");
-      return success();
-    }
   }];
 
   let hasCustomAssemblyFormat = 1;
@@ -425,11 +367,11 @@ def HWModuleGeneratedOp : HWModuleOpBase<"module.generated", [
     The 'verilogName' attribute (when present) specifies the spelling of the
     module name in Verilog we can use.  See hw.module for an explanation.
   }];
-  let arguments = (ins FlatSymbolRefAttr:$generatorKind,
-                       TypeAttrOf<FunctionType>:$function_type,
-		       OptionalAttr<DictArrayAttr>:$arg_attrs,
-                       OptionalAttr<DictArrayAttr>:$res_attrs,
-                       StrArrayAttr:$argNames, StrArrayAttr:$resultNames,
+  let arguments = (ins SymbolNameAttr:$sym_name,
+                       FlatSymbolRefAttr:$generatorKind,
+                       TypeAttrOf<ModuleType>:$module_type,
+                       DictArrayAttr:$per_port_attrs,
+                       LocationArrayAttr:$portLocs,
                        ParamDeclArrayAttr:$parameters,
                        OptionalAttr<StrAttr>:$verilogName);
   let results = (outs);
@@ -469,23 +411,6 @@ def HWModuleGeneratedOp : HWModuleOpBase<"module.generated", [
     void getAsmBlockArgumentNames(mlir::Region &region,
                                   mlir::OpAsmSetValueNameFn setNameFn);
 
-    /// Returns the argument types of this function.
-    ArrayRef<Type> getArgumentTypes() { return getFunctionType().getInputs(); }
-
-    /// Returns the result types of this function.
-    ArrayRef<Type> getResultTypes() { return getFunctionType().getResults(); }
-
-    /// Verify the type attribute of this function. Returns failure and emits
-    /// an error if the attribute is invalid.
-    LogicalResult verifyType() {
-      auto type = getFunctionTypeAttr().getValue();
-      if (!type.isa<FunctionType>())
-        return emitOpError("requires '" + getFunctionTypeAttrName().getValue() +
-                           "' attribute of function type");
-      return success();
-    }
-
-    TypeAttr getTypeAttr();
   }];
 
   let hasCustomAssemblyFormat = 1;
@@ -494,6 +419,7 @@ def HWModuleGeneratedOp : HWModuleOpBase<"module.generated", [
 
 def InstanceOp : HWOp<"instance", [
         DeclareOpInterfaceMethods<SymbolUserOpInterface>,
+        DeclareOpInterfaceMethods<PortList>,
         DeclareOpInterfaceMethods<OpAsmOpInterface, ["getAsmResultNames"]>,
         DeclareOpInterfaceMethods<InnerSymbol, ["getTargetResultIndex"]>,
         DeclareOpInterfaceMethods<HWInstanceLike>]> {
@@ -547,12 +473,12 @@ def InstanceOp : HWOp<"instance", [
     void setResultName(size_t i, StringAttr name);
 
     /// Change the names of all the input ports.
-    void setArgumentNames(ArrayAttr names) {
+    void setInputNames(ArrayAttr names) {
       setArgNamesAttr(names);
     }
 
     /// Change the names of all the result ports.
-    void setResultNames(ArrayAttr names) {
+    void setOutputNames(ArrayAttr names) {
       setResultNamesAttr(names);
     }
 
@@ -562,8 +488,10 @@ def InstanceOp : HWOp<"instance", [
     Operation *getReferencedModule(SymbolTable& tbl);
     Operation *getReferencedModuleSlow();
 
-    /// Return the value for a port in port order.
-    Value getValue(size_t idx);
+    /// Return the values for the port in port order.
+    /// Note: The module ports may not be input, output ordered. This computes
+    /// the port index to instance result/input Value mapping.
+    void getValues(SmallVectorImpl<Value> &values, const ModulePortInfo &mpi);
 
     //===------------------------------------------------------------------===//
     // SymbolOpInterface Methods
@@ -571,11 +499,6 @@ def InstanceOp : HWOp<"instance", [
 
     /// An InstanceOp may optionally define a symbol.
     bool isOptionalSymbol() { return true; }
-
-    //===------------------------------------------------------------------===//
-    // PortList Methods
-    //===------------------------------------------------------------------===//
-    ::circt::hw::ModulePortInfo getPortList();
 
   }];
 

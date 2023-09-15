@@ -19,8 +19,8 @@
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/DialectImplementation.h"
-#include "mlir/IR/FunctionImplementation.h"
-#include "mlir/IR/FunctionInterfaces.h"
+#include "mlir/Interfaces/FunctionImplementation.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -302,12 +302,12 @@ static ParseResult parseModuleLikeOp(OpAsmParser &parser,
 }
 
 template <typename ModuleTy>
-static void printModuleLikeOp(mlir::FunctionOpInterface moduleLike,
-                              OpAsmPrinter &p, Attribute parameters = nullptr) {
+static void printModuleLikeOp(hw::HWModuleLike moduleLike, OpAsmPrinter &p,
+                              Attribute parameters = nullptr) {
   using namespace mlir::function_interface_impl;
 
-  auto argTypes = moduleLike.getArgumentTypes();
-  auto resultTypes = moduleLike.getResultTypes();
+  auto argTypes = moduleLike.getInputTypes();
+  auto resultTypes = moduleLike.getOutputTypes();
 
   // Print the operation and the function name.
   p << ' ';
@@ -340,7 +340,7 @@ static void printModuleLikeOp(mlir::FunctionOpInterface moduleLike,
   printFunctionAttributes(p, moduleLike, omittedAttrs);
 
   // Print the body if this is not an external function.
-  Region &mbody = moduleLike.getFunctionBody();
+  Region &mbody = moduleLike.getModuleBody();
   if (!mbody.empty()) {
     p << ' ';
     p.printRegion(mbody, /*printEntryBlockArgs=*/false,
@@ -367,6 +367,16 @@ ArrayAttr DynamicInstanceOp::globalRefPath() {
 // InstanceOp
 //===----------------------------------------------------------------------===//
 
+size_t InstanceOp::getNumPorts() { return getNumOperands() + getNumResults(); }
+size_t InstanceOp::getNumInputPorts() { return getNumOperands(); }
+size_t InstanceOp::getNumOutputPorts() { return getNumResults(); }
+
+size_t InstanceOp::getPortIdForInputId(size_t idx) { return idx; }
+
+size_t InstanceOp::getPortIdForOutputId(size_t idx) {
+  return idx + getNumInputPorts();
+}
+
 std::optional<size_t> InstanceOp::getTargetResultIndex() {
   // Inner symbols on instance operations target the op not any result.
   return std::nullopt;
@@ -380,8 +390,7 @@ LogicalResult InstanceOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
            << getModuleName() << "'";
 
   // It must be some sort of module.
-  if (!hw::isAnyModule(module) &&
-      !isa<MSFTModuleOp, MSFTModuleExternOp>(module))
+  if (!isa<hw::HWModuleLike>(module))
     return emitError("symbol reference '")
            << getModuleName() << "' isn't a module";
   return success();
@@ -403,10 +412,15 @@ hw::ModulePortInfo InstanceOp::getPortList() {
 }
 
 StringAttr InstanceOp::getResultName(size_t idx) {
-  if (auto *refMod = getReferencedModuleSlow())
-    return hw::getModuleResultNameAttr(refMod, idx);
+  if (auto *refMod = getReferencedModuleSlow()) {
+    if (auto mod = dyn_cast<hw::HWModuleLike>(refMod)) {
+      return mod.getOutputNameAttr(idx);
+    }
+    llvm::report_fatal_error("Instance not of Module");
+  }
   return StringAttr();
 }
+
 /// Instance name is the same as the symbol name. This may change in the
 /// future.
 mlir::StringAttr InstanceOp::getInstanceNameAttr() {
@@ -549,61 +563,37 @@ MSFTModuleOp::addPorts(ArrayRef<std::pair<StringAttr, Type>> inputs,
   terminator->setOperands(modifiedOutputs);
 
   // Finalize and return.
-  setType(FunctionType::get(ctxt, modifiedArgs, modifiedResults));
+  setFunctionType(FunctionType::get(ctxt, modifiedArgs, modifiedResults));
   return newBlockArgs;
 }
 
 // Remove the ports at the specified indexes.
 SmallVector<unsigned> MSFTModuleOp::removePorts(llvm::BitVector inputs,
                                                 llvm::BitVector outputs) {
-  MLIRContext *ctxt = getContext();
-  FunctionType ftype = getFunctionType();
   Block *body = getBodyBlock();
   Operation *terminator = body->getTerminator();
 
-  SmallVector<Type, 4> newInputTypes;
-  SmallVector<Attribute, 4> newArgNames;
-  SmallVector<Attribute, 4> newArgLocs;
-  unsigned originalNumArgs = ftype.getNumInputs();
-  ArrayRef<Attribute> origArgNames = getArgNamesAttr().getValue();
-  ArrayRef<Attribute> origArgLocs = getArgLocsAttr().getValue();
-  assert(origArgNames.size() == originalNumArgs);
-  for (size_t i = 0; i < originalNumArgs; ++i) {
-    if (!inputs.test(i)) {
-      newInputTypes.emplace_back(ftype.getInput(i));
-      newArgNames.emplace_back(origArgNames[i]);
-      newArgLocs.emplace_back(origArgLocs[i]);
-    }
+  SmallVector<unsigned> removeInputs;
+  unsigned originalNumArgs = getNumInputPorts();
+  for (unsigned i = 0; i < originalNumArgs; ++i) {
+    if (inputs.test(i))
+      removeInputs.push_back(i);
   }
 
-  SmallVector<Type, 4> newResultTypes;
-  SmallVector<Attribute, 4> newResultNames;
-  SmallVector<Attribute, 4> newResultLocs;
-  unsigned originalNumResults = getNumResults();
-  ArrayRef<Attribute> origResNames = getResultNamesAttr().getValue();
-  ArrayRef<Attribute> origResLocs = getResultLocsAttr().getValue();
-  assert(origResNames.size() == originalNumResults);
-  for (size_t i = 0; i < originalNumResults; ++i) {
-    if (!outputs.test(i)) {
-      newResultTypes.emplace_back(ftype.getResult(i));
-      newResultNames.emplace_back(origResNames[i]);
-      newResultLocs.emplace_back(origResLocs[i]);
-    }
+  SmallVector<unsigned> removeOutputs;
+  unsigned originalNumOutputs = getNumOutputPorts();
+  for (size_t i = 0; i < originalNumOutputs; ++i) {
+    if (outputs.test(i))
+      removeOutputs.push_back(i);
   }
-
-  setType(FunctionType::get(ctxt, newInputTypes, newResultTypes));
-  setResultNamesAttr(ArrayAttr::get(ctxt, newResultNames));
-  setResultLocsAttr(ArrayAttr::get(ctxt, newResultLocs));
-  setArgNamesAttr(ArrayAttr::get(ctxt, newArgNames));
-  setArgLocsAttr(ArrayAttr::get(ctxt, newArgLocs));
+  modifyPorts({}, {}, removeInputs, removeOutputs);
 
   // Build new operand list for output op. Construct an output mapping to
   // return as a side-effect.
-  unsigned numResults = ftype.getNumResults();
   SmallVector<Value> newOutputValues;
   SmallVector<unsigned> newToOldResultMap;
 
-  for (unsigned i = 0; i < numResults; ++i) {
+  for (unsigned i = 0; i < originalNumOutputs; ++i) {
     if (!outputs.test(i)) {
       newOutputValues.push_back(terminator->getOperand(i));
       newToOldResultMap.push_back(i);
@@ -682,7 +672,7 @@ LogicalResult MSFTModuleOp::verify() {
 
   // Verify that the block arguments match the op's attributes.
   for (auto [arg, type, loc] :
-       llvm::zip(getArguments(), type.getInputs(), getArgLocs())) {
+       llvm::zip(body.getArguments(), type.getInputs(), getArgLocs())) {
     if (arg.getType() != type)
       return emitOpError("block argument types should match signature types");
     if (arg.getLoc() != loc.cast<LocationAttr>())
@@ -691,6 +681,92 @@ LogicalResult MSFTModuleOp::verify() {
   }
 
   return success();
+}
+
+SmallVector<Location> MSFTModuleOp::getAllPortLocs() {
+  auto empty = UnknownLoc::get(getContext());
+  SmallVector<Location> retval;
+  if (auto locs = getArgLocs()) {
+    for (auto l : locs)
+      retval.push_back(cast<Location>(l));
+  }
+  retval.resize(getNumInputPorts(), empty);
+
+  if (auto locs = getResultLocs()) {
+    for (auto l : locs)
+      retval.push_back(cast<Location>(l));
+  }
+  retval.resize(getNumInputPorts() + getNumOutputPorts(), empty);
+  return retval;
+}
+
+SmallVector<Attribute> MSFTModuleOp::getAllPortAttrs() {
+  SmallVector<Attribute> retval;
+  auto empty = DictionaryAttr::get(getContext());
+  auto attrs = getArgAttrs();
+  if (attrs)
+    for (auto a : *attrs)
+      retval.push_back(a);
+  retval.resize(getNumInputPorts(), empty);
+  attrs = getResAttrs();
+  if (attrs)
+    for (auto a : *attrs)
+      retval.push_back(a);
+  retval.resize(getNumInputPorts() + getNumOutputPorts(), empty);
+  return retval;
+}
+
+void MSFTModuleOp::setAllPortLocs(ArrayRef<Location> locs) {
+  auto numInputs = getNumInputPorts();
+  SmallVector<Attribute> argLocs(locs.begin(), locs.begin() + numInputs);
+  SmallVector<Attribute> resLocs(locs.begin() + numInputs, locs.end());
+  setArgLocsAttr(ArrayAttr::get(getContext(), argLocs));
+  setResultLocsAttr(ArrayAttr::get(getContext(), resLocs));
+}
+
+void MSFTModuleOp::setAllPortAttrs(ArrayRef<Attribute> attrs) {
+  auto numInputs = getNumInputPorts();
+  SmallVector<Attribute> argAttrs(attrs.begin(), attrs.begin() + numInputs);
+  SmallVector<Attribute> resAttrs(attrs.begin() + numInputs, attrs.end());
+  setArgAttrsAttr(ArrayAttr::get(getContext(), argAttrs));
+  setResAttrsAttr(ArrayAttr::get(getContext(), resAttrs));
+}
+
+void MSFTModuleOp::removeAllPortAttrs() {
+  removeArgAttrsAttr();
+  removeResAttrsAttr();
+}
+
+void MSFTModuleOp::setAllPortNames(ArrayRef<Attribute> names) {
+  auto numInputs = getNumInputPorts();
+  SmallVector<Attribute> argNames(names.begin(), names.begin() + numInputs);
+  SmallVector<Attribute> resNames(names.begin() + numInputs, names.end());
+  setArgNamesAttr(ArrayAttr::get(getContext(), argNames));
+  setResultNamesAttr(ArrayAttr::get(getContext(), resNames));
+}
+
+void MSFTModuleOp::setHWModuleType(hw::ModuleType type) {
+  auto argAttrs = getAllInputAttrs();
+  auto resAttrs = getAllOutputAttrs();
+  setFunctionTypeAttr(TypeAttr::get(type.getFuncType()));
+
+  unsigned newNumArgs = type.getNumInputs();
+  unsigned newNumResults = type.getNumOutputs();
+
+  setArgNamesAttr(ArrayAttr::get(getContext(), type.getInputNames()));
+  setResultNamesAttr(ArrayAttr::get(getContext(), type.getOutputNames()));
+
+  auto emptyDict = DictionaryAttr::get(getContext());
+  argAttrs.resize(newNumArgs, emptyDict);
+  resAttrs.resize(newNumResults, emptyDict);
+
+  SmallVector<Attribute> attrs;
+  attrs.append(argAttrs.begin(), argAttrs.end());
+  attrs.append(resAttrs.begin(), resAttrs.end());
+
+  if (attrs.empty())
+    return removeAllPortAttrs();
+  setAllPortAttrs(attrs);
 }
 
 //===----------------------------------------------------------------------===//
@@ -966,10 +1042,105 @@ hw::ModulePortInfo MSFTModuleExternOp::getPortList() {
 }
 
 size_t MSFTModuleExternOp::getNumPorts() {
-  return getArgNames().size() + getResultNames().size();
+  auto typeAttr =
+      getOperation()->getAttrOfType<TypeAttr>(getFunctionTypeAttrName());
+  auto moduleType = typeAttr.getValue().cast<FunctionType>();
+  return moduleType.getNumInputs() + moduleType.getNumResults();
+}
+
+size_t MSFTModuleExternOp::getNumInputPorts() {
+  auto typeAttr =
+      getOperation()->getAttrOfType<TypeAttr>(getFunctionTypeAttrName());
+  auto moduleType = typeAttr.getValue().cast<FunctionType>();
+  return moduleType.getNumInputs();
+}
+
+size_t MSFTModuleExternOp::getNumOutputPorts() {
+  auto typeAttr =
+      getOperation()->getAttrOfType<TypeAttr>(getFunctionTypeAttrName());
+  auto moduleType = typeAttr.getValue().cast<FunctionType>();
+  return moduleType.getNumResults();
+}
+
+size_t MSFTModuleExternOp::getPortIdForInputId(size_t idx) { return idx; }
+
+size_t MSFTModuleExternOp::getPortIdForOutputId(size_t idx) {
+  return idx + getNumInputPorts();
 }
 
 hw::InnerSymAttr MSFTModuleExternOp::getPortSymbolAttr(size_t) { return {}; }
+
+SmallVector<Location> MSFTModuleExternOp::getAllPortLocs() {
+  SmallVector<Location> retval;
+  auto empty = UnknownLoc::get(getContext());
+  for (unsigned i = 0, e = getNumPorts(); i < e; ++i)
+    retval.push_back(empty);
+  return retval;
+}
+
+SmallVector<Attribute> MSFTModuleExternOp::getAllPortAttrs() {
+  SmallVector<Attribute> retval(getNumPorts());
+  if (auto attrs = getArgAttrs()) {
+    for (auto a : *attrs)
+      retval.push_back(a);
+  } else {
+    for (unsigned i = 0, e = getNumInputPorts(); i < e; ++i)
+      retval.push_back({});
+  }
+  if (auto attrs = getResAttrs()) {
+    for (auto a : *attrs)
+      retval.push_back(a);
+  } else {
+    for (unsigned i = 0, e = getNumOutputPorts(); i < e; ++i)
+      retval.push_back({});
+  }
+  return retval;
+}
+
+void MSFTModuleExternOp::setAllPortLocs(ArrayRef<Location> locs) {
+  emitError("port locations not supported");
+}
+
+void MSFTModuleExternOp::setAllPortAttrs(ArrayRef<Attribute> attrs) {
+  auto numInputs = getNumInputPorts();
+  SmallVector<Attribute> argAttrs(attrs.begin(), attrs.begin() + numInputs);
+  SmallVector<Attribute> resAttrs(attrs.begin() + numInputs, attrs.end());
+  setArgAttrsAttr(ArrayAttr::get(getContext(), argAttrs));
+  setResAttrsAttr(ArrayAttr::get(getContext(), resAttrs));
+}
+
+void MSFTModuleExternOp::removeAllPortAttrs() {
+  removeArgAttrsAttr();
+  removeResAttrsAttr();
+}
+
+void MSFTModuleExternOp::setAllPortNames(ArrayRef<Attribute> names) {
+  auto numInputs = getNumInputPorts();
+  SmallVector<Attribute> argNames(names.begin(), names.begin() + numInputs);
+  SmallVector<Attribute> resNames(names.begin() + numInputs, names.end());
+  setArgNamesAttr(ArrayAttr::get(getContext(), argNames));
+  setResultNamesAttr(ArrayAttr::get(getContext(), resNames));
+}
+
+void MSFTModuleExternOp::setHWModuleType(hw::ModuleType type) {
+  auto argAttrs = getAllInputAttrs();
+  auto resAttrs = getAllOutputAttrs();
+  setFunctionTypeAttr(TypeAttr::get(type.getFuncType()));
+  unsigned newNumArgs = getNumInputPorts();
+  unsigned newNumResults = getNumOutputPorts();
+
+  auto emptyDict = DictionaryAttr::get(getContext());
+  argAttrs.resize(newNumArgs, emptyDict);
+  resAttrs.resize(newNumResults, emptyDict);
+
+  SmallVector<Attribute> attrs;
+  attrs.append(argAttrs.begin(), argAttrs.end());
+  attrs.append(resAttrs.begin(), resAttrs.end());
+
+  if (attrs.empty())
+    return removeAllPortAttrs();
+  setAllPortAttrs(attrs);
+}
 
 //===----------------------------------------------------------------------===//
 // OutputOp
@@ -1056,11 +1227,11 @@ void SystolicArrayOp::print(OpAsmPrinter &p) {
       getColInputs().getType().cast<hw::ArrayType>();
   p << " [";
   p.printOperand(getRowInputs());
-  p << " : " << rowInputType.getSize() << " x ";
+  p << " : " << rowInputType.getNumElements() << " x ";
   p.printType(rowInputType.getElementType());
   p << "] [";
   p.printOperand(getColInputs());
-  p << " : " << columnInputType.getSize() << " x ";
+  p << " : " << columnInputType.getNumElements() << " x ";
   p.printType(columnInputType.getElementType());
 
   p << "] pe (";

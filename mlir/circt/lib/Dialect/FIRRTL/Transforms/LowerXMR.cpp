@@ -56,7 +56,8 @@ struct XMRNode {
   SymOrIndexOp info;
   NextNodeOnPath next;
 };
-llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const XMRNode &node) {
+[[maybe_unused]] llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
+                                               const XMRNode &node) {
   os << "node(";
   if (auto attr = dyn_cast<Attribute>(node.info))
     os << "path=" << attr;
@@ -72,7 +73,6 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const XMRNode &node) {
 class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
 
   void runOnOperation() override {
-
     // Populate a CircuitNamespace that can be used to generate unique
     // circuit-level symbols.
     CircuitNamespace ns(getOperation());
@@ -121,7 +121,8 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
             auto nameKind = NameKindEnum::DroppableName;
 
             if (auto [name, rootKnown] = getFieldName(
-                    getFieldRefFromValue(xmrDef), /*nameSafe=*/true);
+                    getFieldRefFromValue(xmrDef, /*lookThroughCasts=*/true),
+                    /*nameSafe=*/true);
                 rootKnown) {
               opName = name + "_probe";
               nameKind = NameKindEnum::InterestingName;
@@ -222,6 +223,13 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
             return success();
           })
           .Case<Forceable>([&](Forceable op) {
+            // Handle declarations containing refs as "data".
+            if (type_isa<RefType>(op.getDataRaw().getType())) {
+              markForRemoval(op);
+              return success();
+            }
+
+            // Otherwise, if forceable track the rwprobe result.
             if (!op.isForceable() || op.getDataRef().use_empty() ||
                 isZeroWidth(op.getDataType()))
               return success();
@@ -342,10 +350,16 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
 
   /// Generate the ABI ref_<circuit>_<module> prefix string into `prefix`.
   void getRefABIPrefix(FModuleLike mod, SmallVectorImpl<char> &prefix) {
-    (Twine("ref_") +
-     (isa<FExtModuleOp>(mod) ? mod.getModuleName() : getOperation().getName()) +
-     "_" + mod.getModuleName())
-        .toVector(prefix);
+    auto modName = mod.getModuleName();
+    auto circuitName = getOperation().getName();
+    if (auto ext = dyn_cast<FExtModuleOp>(*mod)) {
+      // Use defName for module portion, if set.
+      if (auto defname = ext.getDefname(); defname && !defname->empty())
+        modName = *defname;
+      // Assume(/require) all extmodule's are within their own circuit.
+      circuitName = modName;
+    }
+    (Twine("ref_") + circuitName + "_" + modName).toVector(prefix);
   }
 
   /// Get full macro name as StringAttr for the specified ref port.
@@ -427,31 +441,18 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
   }
 
   LogicalResult resolveReference(mlir::TypedValue<RefType> refVal,
-                                 Type desiredType, Location loc,
-                                 Operation *insertBefore, Value &out) {
+                                 ImplicitLocOpBuilder &builder,
+                                 FlatSymbolRefAttr &ref, StringAttr &xmrAttr) {
     auto remoteOpPath = getRemoteRefSend(refVal);
     if (!remoteOpPath)
       return failure();
 
-    ImplicitLocOpBuilder builder(loc, insertBefore);
-    mlir::FlatSymbolRefAttr ref;
     SmallString<128> xmrString;
     if (failed(resolveReferencePath(refVal, builder, ref, xmrString)))
       return failure();
+    xmrAttr =
+        xmrString.empty() ? StringAttr{} : builder.getStringAttr(xmrString);
 
-    // Create the XMR op and convert it to the referenced FIRRTL type.
-    auto referentType = refVal.getType().getType();
-    Value xmrResult;
-    auto xmrType = sv::InOutType::get(lowerType(referentType));
-    xmrResult = builder
-                    .create<sv::XMRRefOp>(
-                        xmrType, ref,
-                        xmrString.empty() ? StringAttr{}
-                                          : builder.getStringAttr(xmrString))
-                    .getResult();
-    out =
-        builder.create<mlir::UnrealizedConversionCastOp>(desiredType, xmrResult)
-            .getResult(0);
     return success();
   }
 
@@ -461,15 +462,20 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
         .Case<RefForceOp, RefForceInitialOp, RefReleaseOp, RefReleaseInitialOp>(
             [&](auto op) {
               // Drop if zero-width target.
-              if (isZeroWidth(op.getDest().getType().getType())) {
+              auto destType = op.getDest().getType();
+              if (isZeroWidth(destType.getType())) {
                 op.erase();
                 return success();
               }
-              Value ref;
-              if (failed(resolveReference(op.getDest(), op.getDest().getType(),
-                                          op.getLoc(), op, ref)))
+
+              ImplicitLocOpBuilder builder(op.getLoc(), op);
+              FlatSymbolRefAttr ref;
+              StringAttr str;
+              if (failed(resolveReference(op.getDest(), builder, ref, str)))
                 return failure();
-              op.getDestMutable().assign(ref);
+
+              Value xmr = builder.create<XMRRefOp>(destType, ref, str);
+              op.getDestMutable().assign(xmr);
               return success();
             })
         .Default([](auto *op) {
@@ -490,10 +496,14 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
       resolve.getResult().replaceAllUsesWith(zeroC);
       return success();
     }
-    Value result;
-    if (failed(resolveReference(resolve.getRef(), resolve.getType(),
-                                resolve.getLoc(), resolve, result)))
+
+    FlatSymbolRefAttr ref;
+    StringAttr str;
+    ImplicitLocOpBuilder builder(resolve.getLoc(), resolve);
+    if (failed(resolveReference(resolve.getRef(), builder, ref, str)))
       return failure();
+
+    Value result = builder.create<XMRDerefOp>(resolve.getType(), ref, str);
     resolve.getResult().replaceAllUsesWith(result);
     return success();
   }
@@ -513,15 +523,17 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
       // attribute which specifies the internal path into the extern module.
       // This string attribute will be used to generate the final xmr.
       auto internalPaths = extRefMod.getInternalPaths();
-      size_t pathsIndex = 0;
       auto numPorts = inst.getNumResults();
       SmallString<128> circuitRefPrefix;
 
       /// Get the resolution string for this ref-type port.
       auto getPath = [&](size_t portNo) {
-        // If there's an internalPaths array, grab the next element.
-        if (!internalPaths.empty())
-          return cast<StringAttr>(internalPaths[pathsIndex++]);
+        // If there's an internal path specified (with path), use that.
+        if (internalPaths)
+          if (auto path =
+                  cast<InternalPathAttr>(internalPaths->getValue()[portNo])
+                      .getPath())
+            return path;
 
         // Otherwise, we're using the ref ABI.  Generate the prefix string
         // and return the macro for the specified port.

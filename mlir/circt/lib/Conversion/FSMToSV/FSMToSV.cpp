@@ -339,7 +339,7 @@ MachineOpConverter::moveOps(Block *block,
     if (op.hasTrait<OpTrait::IsTerminator>())
       return &op;
 
-    op.moveBefore(&hwModuleOp.front(), b.getInsertionPoint());
+    op.moveBefore(hwModuleOp.getBodyBlock(), b.getInsertionPoint());
   }
   return nullptr;
 }
@@ -412,19 +412,19 @@ LogicalResult MachineOpConverter::dispatch() {
   SmallVector<hw::PortInfo, 16> ports;
   auto clkRstIdxs = getMachinePortInfo(ports, machineOp, b);
   hwModuleOp = b.create<hw::HWModuleOp>(loc, machineOp.getSymNameAttr(), ports);
-  b.setInsertionPointToStart(&hwModuleOp.front());
+  b.setInsertionPointToStart(hwModuleOp.getBodyBlock());
 
   // Replace all uses of the machine arguments with the arguments of the
   // new created HW module.
-  for (auto args :
-       llvm::zip(machineOp.getArguments(), hwModuleOp.front().getArguments())) {
+  for (auto args : llvm::zip(machineOp.getArguments(),
+                             hwModuleOp.getBodyBlock()->getArguments())) {
     auto machineArg = std::get<0>(args);
     auto hwModuleArg = std::get<1>(args);
     machineArg.replaceAllUsesWith(hwModuleArg);
   }
 
-  auto clock = hwModuleOp.front().getArgument(clkRstIdxs.clockIdx);
-  auto reset = hwModuleOp.front().getArgument(clkRstIdxs.resetIdx);
+  auto clock = hwModuleOp.getBodyBlock()->getArgument(clkRstIdxs.clockIdx);
+  auto reset = hwModuleOp.getBodyBlock()->getArgument(clkRstIdxs.resetIdx);
 
   // 2) Build state and variable registers.
   encoding =
@@ -482,9 +482,10 @@ LogicalResult MachineOpConverter::dispatch() {
 
   // 4/5) Create next-state assignments for each output.
   llvm::SmallVector<CaseMuxItem, 4> outputCaseAssignments;
+  auto hwPortList = hwModuleOp.getPortList();
   for (size_t portIndex = 0; portIndex < machineOp.getNumResults();
        portIndex++) {
-    auto outputPort = hwModuleOp.getOutputPort(portIndex);
+    auto outputPort = hwPortList.atOutput(portIndex);
     auto outputPortType = outputPort.type;
     CaseMuxItem outputAssignment;
     outputAssignment.wire = b.create<sv::RegOp>(
@@ -567,7 +568,7 @@ LogicalResult MachineOpConverter::dispatch() {
 
   // Delete the default created output op and replace it with the output
   // muxes.
-  auto *oldOutputOp = hwModuleOp.front().getTerminator();
+  auto *oldOutputOp = hwModuleOp.getBodyBlock()->getTerminator();
   b.create<hw::OutputOp>(loc, outputPortAssignments);
   oldOutputOp->erase();
 

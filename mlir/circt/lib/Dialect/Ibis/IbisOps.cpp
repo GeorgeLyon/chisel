@@ -11,13 +11,25 @@
 
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/DialectImplementation.h"
-#include "mlir/IR/FunctionImplementation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/SymbolTable.h"
-
+#include "mlir/Interfaces/FunctionImplementation.h"
+#include "llvm/ADT/TypeSwitch.h"
 using namespace mlir;
 using namespace circt;
 using namespace ibis;
+
+// Looks up a `sym`-symbol defining operation of type T in the `mlir::ModuleOp`
+// parent scope of the provided `base` operation.
+template <typename T>
+static T lookupInModule(Operation *base, FlatSymbolRefAttr sym,
+                        SymbolTable *symbolTable) {
+  auto mod = base->getParentOfType<mlir::ModuleOp>();
+  if (symbolTable)
+    return dyn_cast<T>(symbolTable->lookupSymbolIn(mod, sym));
+
+  return mod.lookupSymbol<T>(sym);
+}
 
 template <typename TSymAttr>
 ParseResult parseScopeRefFromName(OpAsmParser &parser, Type &scopeRefType,
@@ -32,6 +44,50 @@ void printScopeRefFromName(OpAsmPrinter &p, Operation *op, Type type,
                            TSymAttr sym) {
   // Nothing to print since this information is already encoded in the child
   // symbol.
+}
+
+// Generates a name for Ibis values.
+// NOLINTBEGIN(misc-no-recursion)
+static llvm::raw_string_ostream &genValueName(llvm::raw_string_ostream &os,
+                                              Value value) {
+  auto *definingOp = value.getDefiningOp();
+  assert(definingOp && "scoperef should always be defined by some op");
+  llvm::TypeSwitch<Operation *, void>(definingOp)
+      .Case<ThisOp>([&](auto op) { os << "this"; })
+      .Case<InstanceOp, ContainerInstanceOp>(
+          [&](auto op) { os << op.getInstanceNameAttr().strref(); })
+      .Case<PortOpInterface>([&](auto op) { os << op.getPortName(); })
+      .Case<PathOp>([&](auto op) {
+        llvm::interleave(
+            op.getPathAsRange(), os,
+            [&](PathStepAttr step) {
+              if (step.getDirection() == PathDirection::Parent)
+                os << "parent";
+              else
+                os << step.getChild().getAttr().strref();
+            },
+            ".");
+      })
+      .Case<GetPortOp>([&](auto op) {
+        genValueName(os, op.getInstance())
+            << "." << op.getPortSymbol() << ".ref";
+      })
+      .Case<PortReadOp>(
+          [&](auto op) { genValueName(os, op.getPort()) << ".val"; })
+      .Default([&](auto op) {
+        op->emitOpError() << "unhandled value type";
+        assert(false && "unhandled value type");
+      });
+  return os;
+}
+// NOLINTEND(misc-no-recursion)
+
+// Generates a name for Ibis values, and returns a StringAttr.
+static StringAttr genValueNameAttr(Value v) {
+  std::string s;
+  llvm::raw_string_ostream os(s);
+  genValueName(os, v);
+  return StringAttr::get(v.getContext(), s);
 }
 
 //===----------------------------------------------------------------------===//
@@ -119,7 +175,6 @@ ParseResult MethodOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parser.parseRegion(*body, args))
     return failure();
 
-  ensureTerminator(*body, parser.getBuilder(), result.location);
   return success();
 }
 
@@ -190,23 +245,66 @@ LogicalResult ReturnOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
+// GetVarOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult GetVarOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
+  auto varOp = getTarget(&symbolTable.getSymbolTable(
+      getOperation()->getParentOfType<mlir::ModuleOp>()));
+
+  if (failed(varOp))
+    return failure();
+
+  // Ensure that the dereferenced type is the same type as the variable type.
+  if (varOp->getType() != getType())
+    return emitOpError() << "dereferenced type (" << getType()
+                         << ") must match variable type (" << varOp->getType()
+                         << ")";
+
+  return success();
+}
+
+FailureOr<VarOp> GetVarOp::getTarget(SymbolTable *symbolTable) {
+  auto targetClassSym =
+      getInstance().getType().cast<ScopeRefType>().getScopeRef();
+  auto targetClass =
+      lookupInModule<ClassOp>(getOperation(), targetClassSym, symbolTable);
+
+  if (!targetClass)
+    return emitOpError() << "'" << targetClassSym << "' does not exist";
+
+  // Lookup the variable inside the class scope.
+  auto varName = getVarName();
+  // @teqdruid TODO: make this more efficient using
+  // innersymtablecollection when that's available to non-firrtl dialects.
+  auto var = dyn_cast_or_null<VarOp>(
+      symbolTable->lookupSymbolIn(targetClass.getOperation(), varName));
+  if (!var)
+    return emitOpError() << "'" << varName << "' does not exist in '"
+                         << targetClassSym << "'";
+  return {var};
+}
+
+//===----------------------------------------------------------------------===//
 // InstanceOp
 //===----------------------------------------------------------------------===//
 
 LogicalResult InstanceOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
-  auto targetClass = getClass(&symbolTable);
+  auto targetClass = getClass(&symbolTable.getSymbolTable(
+      getOperation()->getParentOfType<mlir::ModuleOp>()));
   if (!targetClass)
     return emitOpError() << "'" << getTargetName() << "' does not exist";
 
   return success();
 }
 
-ClassOp InstanceOp::getClass(SymbolTableCollection *symbolTable) {
-  auto mod = getOperation()->getParentOfType<mlir::ModuleOp>();
-  if (symbolTable)
-    return symbolTable->lookupSymbolIn<ClassOp>(mod, getTargetNameAttr());
+ClassOp InstanceOp::getClass(SymbolTable *symbolTable) {
+  return lookupInModule<ClassOp>(getOperation(), getTargetNameAttr(),
+                                 symbolTable);
+}
 
-  return mod.lookupSymbol<ClassOp>(getTargetNameAttr());
+void InstanceOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
+  setNameFn(getResult(), genValueNameAttr(getResult()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -219,17 +317,17 @@ LogicalResult GetPortOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   ScopeRefType crt = getInstance().getType().cast<ScopeRefType>();
   // @teqdruid TODO: make this more efficient using
   // innersymtablecollection when that's available to non-firrtl dialects.
-  auto targetClass =
-      symbolTable.lookupSymbolIn<ClassOp>(mod, crt.getScopeRef());
-  assert(targetClass && "should have been verified by the type system");
+  ScopeOpInterface targetScope =
+      symbolTable.lookupSymbolIn<ScopeOpInterface>(mod, crt.getScopeRef());
+  assert(targetScope && "should have been verified by the type system");
   // @teqdruid TODO: make this more efficient using
   // innersymtablecollection when that's available to non-firrtl dialects.
-  Operation *targetOp =
-      symbolTable.lookupSymbolIn(targetClass, getPortSymbolAttr());
+  Operation *targetOp = targetScope.lookupPort(getPortSymbol());
 
   if (!targetOp)
     return emitOpError() << "port '" << getPortSymbolAttr()
-                         << "' does not exist in " << targetClass.getName();
+                         << "' does not exist in "
+                         << targetScope.getScopeName();
 
   auto portOp = dyn_cast<PortOpInterface>(targetOp);
   if (!portOp)
@@ -244,6 +342,26 @@ LogicalResult GetPortOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
                          << ", but this op has type " << thisPortType;
 
   return success();
+}
+
+LogicalResult GetPortOp::canonicalize(GetPortOp op, PatternRewriter &rewriter) {
+  // Canonicalize away get_port on %this in favor of using the port SSA value
+  // directly.
+  // get_port(%this, @P) -> ibis.port.#
+  auto parentScope = cast<ScopeOpInterface>(op->getParentOp());
+  auto scopeThis = parentScope.getThis();
+
+  if (op.getInstance() == scopeThis) {
+    auto definingPort = parentScope.lookupPort(op.getPortSymbol());
+    rewriter.replaceOp(op, {definingPort.getPort()});
+    return success();
+  }
+
+  return failure();
+}
+
+void GetPortOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
+  setNameFn(getResult(), genValueNameAttr(getResult()));
 }
 
 //===----------------------------------------------------------------------===//
@@ -266,24 +384,283 @@ LogicalResult ThisOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   return success();
 }
 
+void ThisOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
+  setNameFn(getResult(), "this");
+}
+
+//===----------------------------------------------------------------------===//
+// PortReadOp
+//===----------------------------------------------------------------------===//
+
+void PortReadOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
+  setNameFn(getResult(), genValueNameAttr(getResult()));
+}
+
 //===----------------------------------------------------------------------===//
 // ContainerInstanceOp
 //===----------------------------------------------------------------------===//
 
-ContainerOp
-ContainerInstanceOp::getContainer(SymbolTableCollection *symbolTable) {
+ContainerOp ContainerInstanceOp::getContainer(SymbolTable *symbolTable) {
   auto mod = getOperation()->getParentOfType<mlir::ModuleOp>();
   if (symbolTable)
-    return symbolTable->lookupSymbolIn<ContainerOp>(mod, getTargetNameAttr());
+    return dyn_cast_or_null<ContainerOp>(
+        symbolTable->lookupSymbolIn(mod, getTargetNameAttr()));
 
   return mod.lookupSymbol<ContainerOp>(getTargetNameAttr());
 }
 
 LogicalResult
 ContainerInstanceOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
-  auto targetContainer = getContainer(&symbolTable);
+  auto targetContainer = getContainer(&symbolTable.getSymbolTable(
+      getOperation()->getParentOfType<mlir::ModuleOp>()));
   if (!targetContainer)
     return emitOpError() << "'" << getTargetName() << "' does not exist";
+
+  return success();
+}
+
+void ContainerInstanceOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
+  setNameFn(getResult(), genValueNameAttr(getResult()));
+}
+
+//===----------------------------------------------------------------------===//
+// PathOp
+//===----------------------------------------------------------------------===//
+
+/// Infer the return types of this operation.
+LogicalResult PathOp::inferReturnTypes(
+    MLIRContext *context, std::optional<Location> loc, ValueRange operands,
+    DictionaryAttr attrs, mlir::OpaqueProperties properties,
+    mlir::RegionRange regions, SmallVectorImpl<Type> &results) {
+  auto path = attrs.get("path").cast<ArrayAttr>();
+  if (path.empty())
+    return failure();
+
+  auto lastStep = path.getValue().back().cast<PathStepAttr>();
+  results.push_back(lastStep.getType());
+  return success();
+}
+
+LogicalResult PathStepAttr::verify(function_ref<InFlightDiagnostic()> emitError,
+                                   PathDirection direction, mlir::Type type,
+                                   mlir::FlatSymbolRefAttr instance) {
+  // 'parent' should never have an instance name specified.
+  if (direction == PathDirection::Parent && instance)
+    return emitError() << "ibis.step 'parent' may not specify an instance name";
+
+  if (direction == PathDirection::Child && !instance)
+    return emitError() << "ibis.step 'child' must specify an instance name";
+
+  // Only allow scoperefs
+  auto scoperefType = type.dyn_cast<ScopeRefType>();
+  if (!scoperefType)
+    return emitError() << "ibis.step type must be an !ibis.scoperef type";
+
+  return success();
+}
+
+LogicalResult PathOp::verify() {
+  auto pathRange = getPathAsRange();
+  if (pathRange.empty())
+    return emitOpError() << "ibis.path must have at least one step";
+
+  // Verify that each referenced child symbol actually exists at the module
+  // level.
+  auto mod = getOperation()->getParentOfType<mlir::ModuleOp>();
+  for (PathStepAttr step : getPathAsRange()) {
+    auto scoperefType = step.getType().cast<ScopeRefType>();
+    FlatSymbolRefAttr scopeRefSym = scoperefType.getScopeRef();
+    if (!scopeRefSym)
+      continue;
+
+    auto *targetScope = mod.lookupSymbol(scopeRefSym);
+    if (!targetScope)
+      return emitOpError() << "ibis.step scoperef symbol '" << scopeRefSym
+                           << "' does not exist";
+  }
+
+  // Verify that the last step is fully typed.
+  PathStepAttr lastStep = *std::prev(getPathAsRange().end());
+  ScopeRefType lastStepType = lastStep.getType().cast<ScopeRefType>();
+  if (!lastStepType.getScopeRef())
+    return emitOpError()
+           << "last ibis.step in path must specify a symbol for the scoperef";
+
+  return success();
+}
+
+LogicalResult PathOp::canonicalize(PathOp op, PatternRewriter &rewriter) {
+  // Canonicalize away ibis.path [ibis.child] to just referencing the instance
+  // in the current scope.
+  auto range = op.getPathAsRange();
+  size_t pathSize = std::distance(range.begin(), range.end());
+  PathStepAttr firstStep = *range.begin();
+  if (pathSize == 1 && firstStep.getDirection() == PathDirection::Child) {
+    auto parentScope = cast<ScopeOpInterface>(op->getParentOp());
+    Operation *childInstance =
+        SymbolTable::lookupSymbolIn(parentScope, firstStep.getChild());
+    assert(childInstance && "should have been verified by the op verifier");
+    rewriter.replaceOp(op,
+                       {cast<ContainerInstanceOp>(childInstance).getResult()});
+    return success();
+  }
+
+  return failure();
+}
+
+void PathOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
+  setNameFn(getResult(), genValueNameAttr(getResult()));
+}
+
+//===----------------------------------------------------------------------===//
+// OutputPortOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult OutputPortOp::canonicalize(OutputPortOp op,
+                                         PatternRewriter &rewriter) {
+  // Replace any reads of an output port op that is written to from the same
+  // scope, with the value that is written to it.
+  PortWriteOp writer;
+  llvm::SmallVector<PortReadOp, 4> readers;
+  for (auto *user : op.getResult().getUsers()) {
+    if (auto read = dyn_cast<PortReadOp>(user)) {
+      readers.push_back(read);
+    } else if (auto write = dyn_cast<PortWriteOp>(user);
+               write && write.getPort() == op.getPort()) {
+      assert(!writer && "should only have one writer");
+      writer = write;
+    }
+  }
+
+  if (!readers.empty()) {
+    for (auto reader : readers)
+      rewriter.replaceOp(reader, writer.getValue());
+    return success();
+  }
+
+  return failure();
+}
+
+//===----------------------------------------------------------------------===//
+// InputWireOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult InputWireOp::canonicalize(InputWireOp op,
+                                        PatternRewriter &rewriter) {
+  // Canonicalize away wires which are assigned within this scope.
+  auto portUsers = op.getPort().getUsers();
+  size_t nPortUsers = std::distance(portUsers.begin(), portUsers.end());
+  for (auto *portUser : op.getPort().getUsers()) {
+    auto writer = dyn_cast<PortWriteOp>(portUser);
+    if (writer && writer.getPort() == op.getPort() && nPortUsers == 1) {
+      rewriter.replaceAllUsesWith(op.getOutput(), writer.getValue());
+      rewriter.eraseOp(writer);
+      rewriter.eraseOp(op);
+      return success();
+    }
+  }
+
+  return failure();
+}
+
+//===----------------------------------------------------------------------===//
+// OutputWireOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult OutputWireOp::canonicalize(OutputWireOp op,
+                                         PatternRewriter &rewriter) {
+  // Canonicalize away wires which are read (and nothing else) within this
+  // scope. Assume that duplicate reads have been CSE'd away and just look
+  // for a single reader.
+  auto portUsers = op.getPort().getUsers();
+  size_t nPortUsers = std::distance(portUsers.begin(), portUsers.end());
+  for (auto *portUser : op.getPort().getUsers()) {
+    auto reader = dyn_cast<PortReadOp>(portUser);
+    if (reader && reader.getPort() == op.getPort() && nPortUsers == 1) {
+      rewriter.replaceOp(reader, op.getInput());
+      rewriter.eraseOp(op);
+      return success();
+    }
+  }
+
+  return failure();
+}
+
+//===----------------------------------------------------------------------===//
+// StaticBlockOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult StaticBlockOp::verify() {
+  if (getInputs().size() != getBodyBlock()->getNumArguments())
+    return emitOpError("number of inputs must match number of block arguments");
+
+  for (auto [arg, barg] :
+       llvm::zip(getInputs(), getBodyBlock()->getArguments())) {
+    if (arg.getType() != barg.getType())
+      return emitOpError("block argument type must match input type");
+  }
+
+  return success();
+}
+
+ParseResult StaticBlockOp::parse(OpAsmParser &parser, OperationState &result) {
+  // Parse the argument initializer list.
+  llvm::SmallVector<OpAsmParser::UnresolvedOperand> inputOperands;
+  llvm::SmallVector<OpAsmParser::Argument> inputArguments;
+  llvm::SmallVector<Type> inputTypes;
+  ArrayAttr inputNames;
+  if (parsing_util::parseInitializerList(parser, inputArguments, inputOperands,
+                                         inputTypes, inputNames))
+    return failure();
+
+  // Parse the result types.
+  llvm::SmallVector<Type> resultTypes;
+  if (parser.parseOptionalArrowTypeList(resultTypes))
+    return failure();
+  result.addTypes(resultTypes);
+
+  // Parse the attribute dict.
+  if (failed(parser.parseOptionalAttrDictWithKeyword(result.attributes)))
+    return failure();
+
+  // All operands have been parsed - resolve.
+  if (parser.resolveOperands(inputOperands, inputTypes, parser.getNameLoc(),
+                             result.operands))
+    return failure();
+
+  // Parse the body region.
+  Region *body = result.addRegion();
+  if (parser.parseRegion(*body, inputArguments))
+    return failure();
+
+  ensureTerminator(*body, parser.getBuilder(), result.location);
+  return success();
+}
+
+void StaticBlockOp::print(OpAsmPrinter &p) {
+  p << ' ';
+  parsing_util::printInitializerList(p, getInputs(),
+                                     getBodyBlock()->getArguments());
+  p.printOptionalArrowTypeList(getResultTypes());
+  p.printOptionalAttrDictWithKeyword(getOperation()->getAttrs(),
+                                     getAttributeNames());
+  p.printRegion(getBody(), /*printEntryBlockArgs=*/false);
+}
+
+//===----------------------------------------------------------------------===//
+// BlockReturnOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult BlockReturnOp::verify() {
+  auto parent = cast<StaticBlockOp>(getOperation()->getParentOp());
+
+  if (getNumOperands() != parent.getOutputs().size())
+    return emitOpError("number of operands must match number of block outputs");
+
+  for (auto [op, out] : llvm::zip(getOperands(), parent.getOutputs())) {
+    if (op.getType() != out.getType())
+      return emitOpError("operand type must match block output type");
+  }
 
   return success();
 }

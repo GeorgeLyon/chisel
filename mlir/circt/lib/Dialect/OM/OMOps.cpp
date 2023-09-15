@@ -12,6 +12,7 @@
 
 #include "circt/Dialect/OM/OMOps.h"
 
+#include "circt/Dialect/HW/HWOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
 
@@ -235,9 +236,6 @@ void circt::om::ObjectOp::build(::mlir::OpBuilder &odsBuilder,
 
 LogicalResult
 circt::om::ObjectOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
-  // Get the containing ModuleOp.
-  auto moduleOp = getOperation()->getParentOfType<ModuleOp>();
-
   // Verify the result type is the same as the referred-to class.
   StringAttr resultClassName = getResult().getType().getClassName().getAttr();
   StringAttr className = getClassNameAttr();
@@ -248,7 +246,7 @@ circt::om::ObjectOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
 
   // Verify the referred to ClassOp exists.
   auto classDef = dyn_cast_or_null<ClassLike>(
-      symbolTable.lookupSymbolIn(moduleOp, className));
+      symbolTable.lookupNearestSymbolFrom(*this, className));
   if (!classDef)
     return emitOpError("refers to non-existant class (") << className << ')';
 
@@ -283,13 +281,10 @@ circt::om::ObjectOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
 
 LogicalResult
 circt::om::ObjectFieldOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
-  // Get the containing ModuleOp.
-  auto moduleOp = getOperation()->getParentOfType<ModuleOp>();
-
   // Get the ObjectInstOp and the ClassLike it is an instance of.
   ObjectOp objectInst = getObject().getDefiningOp<ObjectOp>();
-  ClassLike classDef = cast<ClassLike>(
-      symbolTable.lookupSymbolIn(moduleOp, objectInst.getClassNameAttr()));
+  ClassLike classDef = cast<ClassLike>(symbolTable.lookupNearestSymbolFrom(
+      *this, objectInst.getClassNameAttr()));
 
   // Traverse the field path, verifying each field exists.
   ClassFieldLike finalField;
@@ -298,8 +293,16 @@ circt::om::ObjectFieldOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   for (size_t i = 0, e = fields.size(); i < e; ++i) {
     // Verify the field exists on the ClassOp.
     auto field = fields[i];
-    ClassFieldLike fieldDef = cast_or_null<ClassFieldLike>(
-        symbolTable.lookupSymbolIn(classDef, field));
+    ClassFieldLike fieldDef;
+    classDef.walk([&](SymbolOpInterface symbol) {
+      if (auto fieldLike = dyn_cast<ClassFieldLike>(symbol.getOperation())) {
+        if (symbol.getNameAttr() == field.getAttr()) {
+          fieldDef = fieldLike;
+          return WalkResult::interrupt();
+        }
+      }
+      return WalkResult::advance();
+    });
     if (!fieldDef) {
       auto error = emitOpError("referenced non-existant field ") << field;
       error.attachNote(classDef.getLoc()) << "class defined here";
@@ -318,7 +321,7 @@ circt::om::ObjectFieldOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
       // The nested ClassOp must exist, since a field with ClassType must be
       // an ObjectInstOp, which already verifies the class exists.
       classDef = cast<ClassLike>(
-          symbolTable.lookupSymbolIn(moduleOp, classType.getClassName()));
+          symbolTable.lookupNearestSymbolFrom(*this, classType.getClassName()));
 
       // Proceed to the next field in the path.
       continue;
@@ -377,6 +380,88 @@ ParseResult circt::om::ListCreateOp::parse(OpAsmParser &parser,
   for (auto operand : operands)
     if (parser.resolveOperand(operand, elemType, result.operands))
       return failure();
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// TupleCreateOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult TupleCreateOp::inferReturnTypes(
+    MLIRContext *context, std::optional<Location> location, ValueRange operands,
+    DictionaryAttr attributes, OpaqueProperties, RegionRange regions,
+    llvm::SmallVectorImpl<Type> &inferredReturnTypes) {
+  ::llvm::SmallVector<Type> types;
+  for (auto op : operands)
+    types.push_back(op.getType());
+  inferredReturnTypes.push_back(TupleType::get(context, types));
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// TupleGetOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult TupleGetOp::inferReturnTypes(
+    MLIRContext *context, std::optional<Location> location, ValueRange operands,
+    DictionaryAttr attributes, OpaqueProperties, RegionRange regions,
+    llvm::SmallVectorImpl<Type> &inferredReturnTypes) {
+  auto idx = attributes.getAs<IntegerAttr>("index");
+  if (operands.empty() || !idx)
+    return failure();
+
+  auto tupleTypes = operands[0].getType().cast<TupleType>().getTypes();
+  if (tupleTypes.size() <= idx.getValue().getLimitedValue()) {
+    if (location)
+      mlir::emitError(*location,
+                      "tuple index out-of-bounds, must be less than ")
+          << tupleTypes.size() << " but got "
+          << idx.getValue().getLimitedValue();
+    return failure();
+  }
+
+  inferredReturnTypes.push_back(tupleTypes[idx.getValue().getLimitedValue()]);
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// MapCreateOp
+//===----------------------------------------------------------------------===//
+
+void circt::om::MapCreateOp::print(OpAsmPrinter &p) {
+  p << " ";
+  p.printOperands(getInputs());
+  p.printOptionalAttrDict((*this)->getAttrs());
+  p << " : " << getType().cast<circt::om::MapType>().getKeyType() << ", "
+    << getType().cast<circt::om::MapType>().getValueType();
+}
+
+ParseResult circt::om::MapCreateOp::parse(OpAsmParser &parser,
+                                          OperationState &result) {
+  llvm::SmallVector<OpAsmParser::UnresolvedOperand, 16> operands;
+  Type elementType, valueType;
+
+  if (parser.parseOperandList(operands) ||
+      parser.parseOptionalAttrDict(result.attributes) || parser.parseColon() ||
+      parser.parseType(elementType) || parser.parseComma() ||
+      parser.parseType(valueType))
+    return failure();
+  result.addTypes({circt::om::MapType::get(elementType, valueType)});
+  auto operandType =
+      mlir::TupleType::get(valueType.getContext(), {elementType, valueType});
+
+  for (auto operand : operands)
+    if (parser.resolveOperand(operand, operandType, result.operands))
+      return failure();
+  return success();
+}
+
+LogicalResult PathOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
+  // Get the containing ModuleOp.
+  auto hierPath = symbolTable.lookupNearestSymbolFrom<hw::HierPathOp>(
+      *this, getTargetAttr());
+  if (!hierPath)
+    return emitOpError("invalid symbol reference");
   return success();
 }
 

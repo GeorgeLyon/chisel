@@ -113,6 +113,9 @@ struct Emitter {
   void emitExpression(ConstCastOp op);
   void emitExpression(StringConstantOp op);
   void emitExpression(FIntegerConstantOp op);
+  void emitExpression(BoolConstantOp op);
+  void emitExpression(ListCreateOp op);
+  void emitExpression(UnresolvedPathOp op);
 
   void emitPrimExpr(StringRef mnemonic, Operation *op,
                     ArrayRef<uint32_t> attrs = {});
@@ -230,6 +233,21 @@ struct Emitter {
       ps << ")";
     });
     emitLocationAndNewLine(op);
+  }
+
+  template <typename EachFn, typename Range>
+  void emitLiteralExpression(Type type, const Range &r, EachFn eachFn) {
+    emitType(type);
+    ps << "(";
+    ps.scopedBox(PP::ibox0, [&]() {
+      interleaveComma(r, eachFn);
+      ps << ")";
+    });
+  }
+
+  void emitLiteralExpression(Type type, ValueRange values) {
+    return emitLiteralExpression(type, values,
+                                 [&](Value v) { emitSubExprIBox2(v); });
   }
 
 private:
@@ -597,7 +615,7 @@ void Emitter::emitStatement(RegResetOp op) {
   auto legalName = legalize(op.getNameAttr());
   addForceable(op, legalName);
   startStatement();
-  if (FIRVersion::compare(version, {3, 0, 0}) >= 0) {
+  if (FIRVersion(3, 0, 0) <= version) {
     ps.scopedBox(PP::ibox2, [&]() {
       ps << "regreset " << legalName;
       emitTypeWithColon(op.getResult().getType());
@@ -704,7 +722,7 @@ void Emitter::emitVerifStatement(T op, StringRef mnemonic) {
 
 void Emitter::emitStatement(ConnectOp op) {
   startStatement();
-  if (FIRVersion::compare(version, {3, 0, 0}) >= 0) {
+  if (FIRVersion(3, 0, 0) <= version) {
     ps.scopedBox(PP::ibox2, [&]() {
       if (op.getSrc().getDefiningOp<InvalidValueOp>()) {
         ps << "invalidate" << PP::space;
@@ -731,7 +749,7 @@ void Emitter::emitStatement(ConnectOp op) {
 
 void Emitter::emitStatement(StrictConnectOp op) {
   startStatement();
-  if (FIRVersion::compare(version, {3, 0, 0}) >= 0) {
+  if (FIRVersion(3, 0, 0) <= version) {
     ps.scopedBox(PP::ibox2, [&]() {
       if (op.getSrc().getDefiningOp<InvalidValueOp>()) {
         ps << "invalidate" << PP::space;
@@ -988,7 +1006,7 @@ void Emitter::emitStatement(InvalidValueOp op) {
   emitType(op.getType());
   emitLocationAndNewLine(op);
   startStatement();
-  if (FIRVersion::compare(version, {3, 0, 0}) >= 0)
+  if (FIRVersion(3, 0, 0) <= version)
     ps << "invalidate " << PPExtString(name);
   else
     ps << PPExtString(name) << " is invalid";
@@ -1021,7 +1039,7 @@ void Emitter::emitExpression(Value value) {
           // Miscellaneous
           BitsPrimOp, HeadPrimOp, TailPrimOp, PadPrimOp, MuxPrimOp, ShlPrimOp,
           ShrPrimOp, UninferredResetCastOp, ConstCastOp, StringConstantOp,
-          FIntegerConstantOp,
+          FIntegerConstantOp, BoolConstantOp, ListCreateOp, UnresolvedPathOp,
           // Reference expressions
           RefSendOp, RefResolveOp, RefSubOp, RWProbeOp, RefCastOp>(
           [&](auto op) {
@@ -1177,9 +1195,23 @@ void Emitter::emitExpression(FIntegerConstantOp op) {
   ps << ")";
 }
 
+void Emitter::emitExpression(BoolConstantOp op) {
+  ps << "Bool(" << (op.getValue() ? "true" : "false") << ")";
+}
+
 void Emitter::emitExpression(StringConstantOp op) {
   ps << "String(";
   ps.writeQuotedEscaped(op.getValue());
+  ps << ")";
+}
+
+void Emitter::emitExpression(ListCreateOp op) {
+  return emitLiteralExpression(op.getType(), op.getElements());
+}
+
+void Emitter::emitExpression(UnresolvedPathOp op) {
+  ps << "path(";
+  ps.writeQuotedEscaped(op.getTarget());
   ps << ")";
 }
 
@@ -1289,9 +1321,16 @@ void Emitter::emitType(Type type, bool includeConst) {
         emitType(type.getType());
         ps << ">";
       })
+      .Case<AnyRefType>([&](AnyRefType type) { ps << "AnyRef"; })
       .Case<StringType>([&](StringType type) { ps << "String"; })
       .Case<FIntegerType>([&](FIntegerType type) { ps << "Integer"; })
+      .Case<BoolType>([&](BoolType type) { ps << "Bool"; })
       .Case<PathType>([&](PathType type) { ps << "Path"; })
+      .Case<ListType>([&](ListType type) {
+        ps << "List<";
+        emitType(type.getElementType());
+        ps << ">";
+      })
       .Default([&](auto type) {
         llvm_unreachable("all types should be implemented");
       });
@@ -1344,8 +1383,7 @@ void circt::firrtl::registerToFIRFileTranslation() {
   static mlir::TranslateFromMLIRRegistration toFIR(
       "export-firrtl", "emit FIRRTL dialect operations to .fir output",
       [](ModuleOp module, llvm::raw_ostream &os) {
-        return exportFIRFile(module, os, targetLineLength,
-                             FIRVersion::latestFIRVersion());
+        return exportFIRFile(module, os, targetLineLength, latestFIRVersion);
       },
       [](mlir::DialectRegistry &registry) {
         registry.insert<chirrtl::CHIRRTLDialect>();

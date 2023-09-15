@@ -45,6 +45,8 @@ bool ExportVerilog::isSimpleReadOrPort(Value v) {
   auto vOp = v.getDefiningOp();
   if (!vOp)
     return false;
+  if (v.getType().isa<sv::InOutType>() && isa<sv::WireOp>(vOp))
+    return true;
   auto read = dyn_cast<ReadInOutOp>(vOp);
   if (!read)
     return false;
@@ -902,6 +904,36 @@ static LogicalResult legalizeHWModule(Block &block,
         lowerAlwaysInlineOperation(&op, options);
 
       continue;
+    }
+
+    if (auto aggregateConstantOp = dyn_cast<hw::AggregateConstantOp>(op);
+        options.disallowPackedStructAssignments && aggregateConstantOp) {
+      if (hw::StructType structType =
+              type_dyn_cast<hw::StructType>(aggregateConstantOp.getType())) {
+        // Create hw struct create op and apply the legalization again.
+        SmallVector<Value> operands;
+        ImplicitLocOpBuilder builder(op.getLoc(), op.getContext());
+        builder.setInsertionPointAfter(&op);
+        for (auto [value, field] :
+             llvm::zip(aggregateConstantOp.getFieldsAttr(),
+                       structType.getElements())) {
+          if (auto arrayAttr = dyn_cast<mlir::ArrayAttr>(value))
+            operands.push_back(
+                builder.create<hw::AggregateConstantOp>(field.type, arrayAttr));
+          else
+            operands.push_back(builder.create<hw::ConstantOp>(
+                field.type, cast<mlir::IntegerAttr>(value)));
+        }
+
+        auto structCreate =
+            builder.create<hw::StructCreateOp>(structType, operands);
+        aggregateConstantOp.getResult().replaceAllUsesWith(structCreate);
+        // Reset the iterator.
+        opIterator = std::next(op.getIterator());
+
+        op.erase();
+        continue;
+      }
     }
 
     if (auto structCreateOp = dyn_cast<hw::StructCreateOp>(op);

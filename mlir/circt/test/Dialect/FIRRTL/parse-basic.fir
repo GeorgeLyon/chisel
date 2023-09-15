@@ -1146,7 +1146,6 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
     module.in <= UInt(1)
 
   ; CHECK-LABEL: firrtl.module private @EnumTypes
-circuit EnumTypes:
   module EnumTypes:
     ; CHECK-SAME: in %i: !firrtl.enum<Some: uint<8>, None: uint<0>>
     input i : {| Some : UInt<8>, None |}
@@ -1170,6 +1169,14 @@ circuit EnumTypes:
       ; CHECK: }
       None:
         o is invalid
+
+  ; CHECK-LABEL: firrtl.module private @EnumInfer(
+  module EnumInfer:
+    input i : {| A: UInt<8>, None |}
+    output o : {| A: UInt, None |}
+
+    ; CHECK: connect %o, %i
+    o <= i
 
   ; CHECK-LABEL: module private @RefsChild(
   ; CHECK-SAME: out %r: !firrtl.probe<uint<1>>
@@ -1302,7 +1309,7 @@ circuit EnumTypes:
 
   ; CHECK-LABEL: extmodule private @RefExt(
   ; CHECK-SAME:  in in: !firrtl.uint<1>, out r: !firrtl.probe<uint<1>>
-  ; CHECK-SAME: internalPaths = ["in"]
+  ; CHECK-SAME: internalPaths = [#firrtl.internalpath, #firrtl.internalpath<"in">]
   extmodule RefExt :
     input in : UInt<1>
     output r : Probe<UInt<1>>
@@ -1313,7 +1320,7 @@ circuit EnumTypes:
   ; CHECK-SAME: out r: !firrtl.probe<uint<1>>
   ; CHECK-SAME: out data: !firrtl.uint<3>
   ; CHECK-SAME: out r2: !firrtl.probe<vector<bundle<a: uint<3>>, 3>>
-  ; CHECK-SAME: internalPaths = ["path.to.internal.signal", "in"]
+  ; CHECK-SAME: internalPaths = [#firrtl.internalpath, #firrtl.internalpath<"path.to.internal.signal">, #firrtl.internalpath, #firrtl.internalpath<"in">]
   extmodule RefExtMore :
     input in : UInt<1>
     output r : Probe<UInt<1>>
@@ -1402,10 +1409,6 @@ circuit EnumTypes:
     ; CHECK-NEXT: [[CAST:%.+]] = firrtl.constCast %s4 : (!firrtl.const.sint<4>) -> !firrtl.sint<4>
     ; CHECK-NEXT: firrtl.strictconnect %nonconst_w, [[CAST]] : !firrtl.sint<4>
     nonconst_w <= s4
-
-  ; CHECK-LABEL firrtl.class @SimpleClass() { }
-  ; Not version-gated yet, not in spec.
-  class SimpleClass:
 
 ;// -----
 
@@ -1676,7 +1679,7 @@ circuit Groups:
 
 ;// -----
 ; CHECK-LABEL: firrtl.circuit "BasicProps"
-FIRRTL version 3.1.0
+FIRRTL version 3.2.0
 circuit BasicProps :
   module BasicProps :
   ; CHECK-LABEL: module private @Integer
@@ -1686,6 +1689,19 @@ circuit BasicProps :
     ; CHECK: %0 = firrtl.integer -10
     ; CHECK: firrtl.propassign %a, %0 : !firrtl.integer
     propassign a, Integer(-10)
+
+  ; CHECK-LABEL: module private @Bool
+  module Bool :
+    ; CHECK-SAME: out %true: !firrtl.bool
+    ; CHECK-SAME: out %false: !firrtl.bool
+    output true : Bool
+    output false : Bool
+    ; CHECK-NEXT: %0 = firrtl.bool true
+    ; CHECK-NEXT: firrtl.propassign %true, %0 : !firrtl.bool
+    ; CHECK-NEXT: %1 = firrtl.bool false
+    ; CHECK-NEXT: firrtl.propassign %false, %1 : !firrtl.bool
+    propassign true, Bool(true)
+    propassign false, Bool(false)
 
   ; CHECK-LABEL: module private @String
   module String :
@@ -1697,17 +1713,161 @@ circuit BasicProps :
 
   ; CHECK-LABEL: module private @Path
   module Path :
-    ; CHECK-SAME: in %a: !firrtl.path
-    ; CHECK-SAME: out %b: !firrtl.path
-    input a : Path
-    output b : Path
-    ; CHECK: firrtl.propassign %b, %a : !firrtl.path
-    propassign b, a
+    ; CHECK-SAME: out %path: !firrtl.path
+    output path : Path
+    ; CHECK: firrtl.unresolved_path "OMDeleted"
+    ; CHECK: firrtl.propassign %path, %0 : !firrtl.path
+    propassign path, path("OMDeleted")
 
-  ; CHECK-LABEL firrtl.class @SimpleClass(in %a: !firrtl.string, out %b: !firrtl.string) {
-  ; CHECK-NEXT    firrtl.propassign %b, %a : !firrtl.string
-  ; CHECK-NEXT  }
+  ; CHECK-LABEL: firrtl.class private @SimpleClass(in %a: !firrtl.string, out %b: !firrtl.string) {
+  ; CHECK-NEXT:     firrtl.propassign %b, %a : !firrtl.string
+  ; CHECK-NEXT:  }
   class SimpleClass:
     input a: String
     output b: String
     propassign b, a
+
+  ; CHECK-LABEL: firrtl.class private @Client(out %a: !firrtl.class<@SimpleClass(in a: !firrtl.string, out b: !firrtl.string)>)
+  class Client:
+    output a: Inst<SimpleClass>
+    ; CHECK-NEXT:  %b = firrtl.object @SimpleClass(in a: !firrtl.string, out b: !firrtl.string)
+    object b of SimpleClass
+    ; CHECK-NEXT: firrtl.propassign %a, %b : !firrtl.class<@SimpleClass(in a: !firrtl.string, out b: !firrtl.string)>
+    propassign a, b
+
+  ; CHECK-LABEL firrtl.class private @OtherClient(in %a: !firrtl.string, out %b: !firrtl.string)
+  class OtherClient:
+    input a : String
+    output b : String
+    object o of SimpleClass
+    ; TODO: This test needs to be fixed up once flow-checking for objects is implemented correctly.
+    propassign b, o.b
+
+  ; CHECK-LABEL firrtl.extclass private @ExtClass(in in: !firrtl.string, out out: !firrtl.string)
+  extclass ExtClass:
+    input in : String
+    output out : String
+
+  ; CHECK-LABEL: firrtl.class private @UserOfExtClass(in %ext_object: !firrtl.class<@ExtClass(in in: !firrtl.string, out out: !firrtl.string)>, out %out: !firrtl.string)
+  class UserOfExtClass:
+    input ext_object : Inst<ExtClass>
+    output out : String
+    ; CHECK-NEXT: %0 = firrtl.object.subfield %ext_object[out] : !firrtl.class<@ExtClass(in in: !firrtl.string, out out: !firrtl.string)
+    ; CHECK-NEXT: firrtl.propassign %out, %0 : !firrtl.string
+    propassign out, ext_object.out
+
+  ; CHECK-LABEL: module private @List
+  module List :
+    ; CHECK-SAME: out %strings: !firrtl.list<string>
+    ; CHECK-SAME: out %objs: !firrtl.list<class<@SimpleClass({{.*}})>>
+    ; CHECK-SAME: out %nested: !firrtl.list<list<string>>
+    output strings : List<String>
+    output objs : List<Inst<SimpleClass>>
+    output nested : List<List<String>>
+
+    ; CHECK-NEXT: %[[HELLO:.+]] = firrtl.string "hello"
+    ; CHECK-NEXT: %[[WORLD:.+]] = firrtl.string "world"
+    ; CHECK-NEXT: %[[STRINGS:.+]] = firrtl.list.create %[[HELLO]], %[[WORLD]] : !firrtl.list<string>
+    ; CHECK-NEXT: firrtl.propassign %strings, %[[STRINGS]] : !firrtl.list<string>
+    propassign strings, List<String>(String("hello"), String("world"))
+
+    ; CHECK-NEXT: %[[OBJ:.+]] = firrtl.object
+    ; CHECK-NEXT: %[[OBJS:.+]] = firrtl.list.create %[[OBJ]], %[[OBJ]] : !firrtl.list<class<@SimpleClass({{.*}})>>
+    ; CHECK-NEXT: firrtl.propassign %objs, %[[OBJS]] : !firrtl.list<class
+    object obj of SimpleClass
+    propassign objs, List<Inst<SimpleClass>>(obj, obj)
+
+    ; CHECK-NEXT: %[[EMPTY1:.+]] = firrtl.list.create : !firrtl.list<string>
+    ; CHECK-NEXT: %[[TEST:.+]] = firrtl.string "test"
+    ; CHECK-NEXT: %[[TESTLIST:.+]] = firrtl.list.create %[[TEST]] : !firrtl.list<string>
+    ; CHECK-NEXT: %[[EMPTY2:.+]] = firrtl.list.create : !firrtl.list<string>
+    ; CHECK-NEXT: %[[NESTED:.+]] = firrtl.list.create %[[EMPTY1]], %[[TESTLIST]], %[[EMPTY2]] : !firrtl.list<list<string>>
+    ; CHECK-NEXT: firrtl.propassign %nested, %[[NESTED]]
+    propassign nested, List<List<String>>(List<String>(), List<String>(String("test")), List<String>())
+
+  ; CHECK-LABEL: module private @Map
+  module Map :
+    ; CHECK-SAME: in %list: !firrtl.list<string>
+    input list : List<String>
+    ; CHECK-SAME: out %str2str: !firrtl.map<string, string>
+    ; CHECK-SAME: out %str2objs: !firrtl.map<string, class<@SimpleClass({{.*}})>>
+    ; CHECK-SAME: out %int2list: !firrtl.map<integer, list<string>>
+    ; CHECK-SAME: out %empty: !firrtl.map<integer, integer>
+    output str2str : Map<String, String>
+    output str2objs : Map<String, Inst<SimpleClass>>
+    output int2list : Map<Integer, List<String>>
+    output empty : Map<Integer, Integer>
+
+    ; CHECK-NEXT: %[[HELLO:.+]] = firrtl.string "hello"
+    ; CHECK-NEXT: %[[WORLD:.+]] = firrtl.string "world"
+    ; CHECK-NEXT: %[[STRINGS:.+]] = firrtl.map.create (%[[HELLO]] -> %[[WORLD]]) : !firrtl.map<string, string>
+    ; CHECK-NEXT: firrtl.propassign %str2str, %[[STRINGS]] : !firrtl.map<string, string>
+    propassign str2str, Map<String, String>(String("hello") -> String("world"))
+
+    ; CHECK-NEXT: %[[OBJ:.+]] = firrtl.object
+    ; CHECK-NEXT: %[[HELLO:.+]] = firrtl.string "hello"
+    ; CHECK-NEXT: %[[WORLD:.+]] = firrtl.string "world"
+    ; CHECK-NEXT: %[[OBJS:.+]] = firrtl.map.create (%[[HELLO]] -> %[[OBJ]], %[[WORLD]] -> %[[OBJ]]) : !firrtl.map<string, class<@SimpleClass({{.*}})>>
+    ; CHECK-NEXT: firrtl.propassign %str2objs, %[[OBJS]] : !firrtl.map<string, class
+    object obj of SimpleClass
+    propassign str2objs, Map<String, Inst<SimpleClass>>(String("hello") -> obj, String("world") -> obj)
+
+    ; CHECK-NEXT: %[[FIVE:.+]] = firrtl.integer 5
+    ; CHECK-NEXT: %[[EMPTY:.+]] = firrtl.list.create : !firrtl.list<string>
+    ; CHECK-NEXT: %[[TEN:.+]] = firrtl.integer 10
+    ; CHECK-NEXT: %[[INTLISTMAP:.+]] = firrtl.map.create (%[[FIVE]] -> %[[EMPTY]], %[[TEN]] -> %list) : !firrtl.map<integer, list<string>>
+    ; CHECK-NEXT: firrtl.propassign %int2list, %[[INTLISTMAP]]
+    propassign int2list, Map<Integer, List<String>>(Integer(5) -> List<String>(), Integer(10) -> list)
+
+    ; CHECK-NEXT: %[[EMPTY:.+]] = firrtl.map.create : !firrtl.map<integer, integer>
+    ; CHECK-NEXT: firrtl.propassign %empty, %[[EMPTY]]
+    propassign empty, Map<Integer, Integer>()
+
+;// -----
+FIRRTL version 3.1.0
+
+; CHECK-LABEL: circuit "BundleOfProps"
+circuit BundleOfProps:
+  module BundleOfProps:
+    input x : {a : String}
+    wire y : {a: String}
+    ; CHECK-COUNT-2: !firrtl.openbundle<a: string>
+
+;// -----
+FIRRTL version 3.1.0
+
+; CHECK-LABEL: circuit "VecOfProps"
+circuit VecOfProps:
+  module VecOfProps:
+    input x : String[2]
+    wire y : String[2]
+    ; CHECK-COUNT-2: openvector<string, 2>
+
+;// -----
+; Test parsing of wires of probes, wires of agg of probes, and namekinds.
+; CHECK-LABEL: circuit "WireOfProbesAndNames"
+circuit WireOfProbesAndNames:
+  module WireOfProbesAndNames:
+    ; CHECK: %mixed = firrtl.wire interesting_name : !firrtl.openbundle
+    wire mixed : { a : UInt<3>, b : Probe<UInt<3>> }
+    ; CHECK: %probe = firrtl.wire : !firrtl.probe
+    wire probe : Probe<UInt<1>>
+
+;// -----
+FIRRTL version 3.2.0
+
+; CHECK-LABEL: circuit "AnyRef"
+circuit AnyRef:
+  class Foo:
+    skip
+  module AnyRef:
+    input x : AnyRef
+    ; CHECK: !firrtl.anyref
+    output y : AnyRef
+    ; CHECK: !firrtl.anyref
+
+    object foo of Foo
+    propassign y, foo
+    ; CHECK: %[[OBJ:.+]] = firrtl.object
+    ; CHECK: %[[CAST:.+]] = firrtl.object.anyref_cast %[[OBJ]]
+    ; CHECK: firrtl.propassign %y, %[[CAST]]

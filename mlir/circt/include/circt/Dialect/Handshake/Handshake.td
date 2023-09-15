@@ -17,7 +17,7 @@ include "mlir/IR/OpBase.td"
 include "mlir/IR/PatternBase.td"
 include "mlir/IR/SymbolInterfaces.td"
 include "mlir/IR/RegionKindInterface.td"
-include "mlir/IR/FunctionInterfaces.td"
+include "mlir/Interfaces/FunctionInterfaces.td"
 include "mlir/Interfaces/CallInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "circt/Dialect/Handshake/HandshakeInterfaces.td"
@@ -34,6 +34,9 @@ def Handshake_Dialect : Dialect {
   }];
 
   let useDefaultAttributePrinterParser = 1;
+
+  // Opt-out of properties for now, must migrate by LLVM 19.  #5273.
+  let usePropertiesForAttributes = 0;
 }
 
 // Base class for Handshake dialect ops.

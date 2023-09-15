@@ -28,6 +28,9 @@ LogicalResult hw::verifyInnerSymAttr(InnerSymbolOpInterface op) {
   if (!innerSym)
     return success();
 
+  if (innerSym.empty())
+    return op->emitOpError("has empty list of inner symbols");
+
   if (!op.supportsPerFieldSymbols()) {
     // The inner sym can only be specified on fieldID=0.
     if (innerSym.size() > 1 || !innerSym.getSymName()) {
@@ -43,12 +46,8 @@ LogicalResult hw::verifyInnerSymAttr(InnerSymbolOpInterface op) {
   // (there are no uses for this presently, but be open to this anyway.)
   if (!result)
     return success();
-  auto resultType = result.getType().dyn_cast<FieldIDTypeInterface>();
-  // If this type doesn't implement the FieldIDTypeInterface, then there is
-  // nothing additional we can check.
-  if (!resultType)
-    return success();
-  auto maxFields = resultType.getMaxFieldID();
+  auto resultType = result.getType();
+  auto maxFields = FieldIdImpl::getMaxFieldID(resultType);
   llvm::SmallBitVector indices(maxFields + 1);
   llvm::SmallPtrSet<Attribute, 8> symNames;
   // Ensure fieldID and symbol names are unique.
@@ -78,6 +77,25 @@ LogicalResult hw::verifyInnerSymAttr(InnerSymbolOpInterface op) {
     return failure();
 
   return success();
+}
+
+raw_ostream &circt::hw::operator<<(raw_ostream &printer, PortInfo port) {
+  StringRef dirstr;
+  switch (port.dir) {
+  case ModulePort::Direction::Input:
+    dirstr = "input";
+    break;
+  case ModulePort::Direction::Output:
+    dirstr = "output";
+    break;
+  case ModulePort::Direction::InOut:
+    dirstr = "inout";
+    break;
+  }
+  printer << dirstr << " " << port.name << " : " << port.type << " (argnum "
+          << port.argNum << ", sym " << port.sym << ", loc " << port.loc
+          << ", args " << port.attrs << ")";
+  return printer;
 }
 
 #include "circt/Dialect/HW/HWOpInterfaces.cpp.inc"

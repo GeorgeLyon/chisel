@@ -43,7 +43,7 @@ static bool isDeletableDeclaration(Operation *op) {
   if (auto name = dyn_cast<FNamableOp>(op))
     if (!name.hasDroppableName())
       return false;
-  return !hasDontTouch(op);
+  return !hasDontTouch(op) && AnnotationSet(op).empty();
 }
 
 /// Return true if the annotation is ok to drop when the target is dead.
@@ -451,7 +451,8 @@ void IMDeadCodeElimPass::runOnOperation() {
       op.erase();
 
   for (auto module : modules)
-    eraseEmptyModule(module);
+    if (module != circuit.getMainModule())
+      eraseEmptyModule(module);
 
   // Clean up data structures.
   executableBlocks.clear();
@@ -515,6 +516,14 @@ void IMDeadCodeElimPass::visitValue(Value value) {
   if (auto op = value.getDefiningOp())
     for (auto operand : op->getOperands())
       markAlive(operand);
+
+  // If either result of a forceable declaration is alive, they both are.
+  if (auto fop = value.getDefiningOp<Forceable>();
+      fop && fop.isForceable() &&
+      (fop.getData() == value || fop.getDataRef() == value)) {
+    markAlive(fop.getData());
+    markAlive(fop.getDataRef());
+  }
 }
 
 void IMDeadCodeElimPass::visitConnect(FConnectLike connect) {
@@ -601,33 +610,6 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
       return;
     }
 
-    // If RefType and live, don't want to leave wire around.
-    if (type_isa<RefType>(result.getType())) {
-      auto getRefDefine = [](Value result) -> RefDefineOp {
-        for (auto *user : result.getUsers()) {
-          if (auto rd = dyn_cast<RefDefineOp>(user);
-              rd && rd.getDest() == result)
-            return rd;
-        }
-        return {};
-      };
-      auto rd = getRefDefine(result);
-      assert(rd && "input ref port to instance is alive, but no driver?");
-      auto source = rd.getSrc();
-      auto *srcDefOp = source.getDefiningOp();
-      if (srcDefOp && llvm::any_of(result.getUsers(), [&](auto user) {
-            return user->getBlock() != source.getParentBlock() ||
-                   user->isBeforeInBlock(source.getDefiningOp());
-          }))
-        llvm::report_fatal_error("unsupported IR with references in IMDCE");
-      result.replaceAllUsesWith(source);
-      liveElements.erase(result);
-      assert(isKnownAlive(source));
-      ++numErasedOps;
-      rd.erase();
-      return;
-    }
-
     Value wire = builder.create<WireOp>(result.getType()).getResult();
     result.replaceAllUsesWith(wire);
     // If a module port is dead but its instance result is alive, the port
@@ -685,10 +667,6 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
                          return isKnownAlive(
                              record->getInstance()->getResult(index));
                        }))
-        continue;
-
-      // RefType can't be a wire, especially if it won't be erased.  Skip.
-      if (type_isa<RefType>(argument.getType()))
         continue;
 
       // Ok, this port is used only within its defined module. So we can replace

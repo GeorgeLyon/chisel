@@ -21,10 +21,10 @@
 #include "circt/Dialect/Seq/SeqAttributes.h"
 #include "circt/Support/FieldRef.h"
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/FunctionInterfaces.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/RegionKindInterface.h"
 #include "mlir/IR/SymbolTable.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
@@ -57,10 +57,18 @@ bool isConstant(Value value);
 /// pairwise connect.
 bool isDuplexValue(Value val);
 
-enum class Flow { Source, Sink, Duplex };
+enum class Flow : uint8_t { None, Source, Sink, Duplex };
 
 /// Get a flow's reverse.
 Flow swapFlow(Flow flow);
+
+constexpr bool isValidSrc(Flow flow) {
+  return uint8_t(flow) & uint8_t(Flow::Source);
+}
+
+constexpr bool isValidDst(Flow flow) {
+  return uint8_t(flow) & uint8_t(Flow::Sink);
+}
 
 /// Compute the flow for a Value, \p val, as determined by the FIRRTL
 /// specification.  This recursively walks backwards from \p val to the

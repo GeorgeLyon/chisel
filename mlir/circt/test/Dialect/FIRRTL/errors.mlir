@@ -97,7 +97,7 @@ firrtl.circuit "foo" {
 // -----
 
 firrtl.circuit "foo" {
-// expected-error @+1 {{requires valid port locations}}
+// expected-error @+1 {{'firrtl.module' op requires attribute 'portLocations'}}
 "firrtl.module"() ( {
   ^entry:
 }) { sym_name = "foo", convention = #firrtl<convention internal>,
@@ -369,6 +369,32 @@ firrtl.circuit "InstanceCannotHavePortSymbols" {
   }
 }
 
+// -----
+
+firrtl.circuit "EmptySym" {
+  firrtl.module @EmptySym() {
+    // expected-error @below {{inner symbol cannot have empty name}}
+    %w = firrtl.wire sym @"" : !firrtl.uint<5>
+  }
+}
+
+// -----
+
+firrtl.circuit "EmptySymField" {
+  firrtl.module @EmptySymField() {
+    // expected-error @below {{inner symbol cannot have empty name}}
+    %w = firrtl.wire sym [<@"",0,public>] : !firrtl.uint<5>
+  }
+}
+
+// -----
+
+firrtl.circuit "NoSymsSym" {
+  firrtl.module @NoSymsSym() {
+    // expected-error @below {{has empty list of inner symbols}}
+    %w = firrtl.wire sym [] : !firrtl.uint<5>
+  }
+}
 
 // -----
 
@@ -1211,12 +1237,14 @@ firrtl.circuit "NoDefineIntoRefSub" {
 // Can't define into a ref.cast.
 
 firrtl.circuit "NoDefineIntoRefCast" {
-  firrtl.module @NoDefineIntoRefCast(out %r: !firrtl.probe<uint<1>>) {
+  firrtl.module @NoDefineIntoRefCast(
     // expected-note @below {{the destination was defined here}}
+      out %r: !firrtl.probe<uint<1>>
+      ) {
     %dest_cast = firrtl.ref.cast %r : (!firrtl.probe<uint<1>>) -> !firrtl.probe<uint>
     %x = firrtl.wire : !firrtl.uint
     %xref = firrtl.ref.send %x : !firrtl.uint
-    // expected-error @below {{has invalid flow: the destination expression has source flow, expected sink or duplex flow}}
+    // expected-error @below {{has invalid flow: the destination expression "r" has source flow, expected sink or duplex flow}}
     firrtl.ref.define %dest_cast, %xref : !firrtl.probe<uint>
   }
 }
@@ -1264,7 +1292,7 @@ firrtl.circuit "CastToMoreConst" {
 // Check that you can't drive a source.
 
 firrtl.circuit "PropertyDriveSource" {
-  // @expected-note @below {{the destination was defined here}}
+  // expected-note @below {{the destination was defined here}}
   firrtl.module @PropertyDriveSource(in %in: !firrtl.string) {
     %0 = firrtl.string "hello"
     // expected-error @below {{connect has invalid flow: the destination expression "in" has source flow, expected sink or duplex flow}}
@@ -1311,6 +1339,85 @@ firrtl.circuit "ListOfHW" {
 firrtl.circuit "MapOfHW" {
   // expected-error @below {{expected property type, found '!firrtl.uint<4>'}}
   firrtl.module @MapOfHW(in %in: !firrtl.map<string,uint<4>>) {}
+}
+
+// -----
+
+// Reject list.create with mixed element types.
+firrtl.circuit "MixedList" {
+  firrtl.module @MixedList(
+      in %s: !firrtl.string,
+      // expected-note @below {{prior use here}}
+      in %int: !firrtl.integer
+      ) {
+    // expected-error @below {{use of value '%int' expects different type than prior uses: '!firrtl.string' vs '!firrtl.integer'}}
+    firrtl.list.create %s, %int : !firrtl.list<string>
+  }
+}
+
+// -----
+
+// Reject map.create with mixed key types.
+firrtl.circuit "MixedMapKeys" {
+  firrtl.module @MixedMapKeys(
+      in %s: !firrtl.string,
+      // expected-note @below {{prior use here}}
+      in %int: !firrtl.integer
+      ) {
+    // expected-error @below {{use of value '%int' expects different type than prior uses: '!firrtl.string' vs '!firrtl.integer'}}
+    firrtl.map.create (%s -> %int, %int -> %int) : !firrtl.map<string, integer>
+  }
+}
+
+// -----
+
+// Reject map.create with mixed value types.
+firrtl.circuit "MixedMapValues" {
+  firrtl.module @MixedMapValues(
+      in %s1: !firrtl.string,
+      // expected-note @below {{prior use here}}
+      in %s2: !firrtl.string,
+      in %int: !firrtl.integer
+      ) {
+    // expected-error @below {{use of value '%s2' expects different type than prior uses: '!firrtl.integer' vs '!firrtl.string'}}
+    firrtl.map.create (%s1 -> %int, %s2 -> %s2) : !firrtl.map<string, integer>
+  }
+}
+
+// -----
+
+// Reject list.create with elements of wrong type compared to result type.
+firrtl.circuit "ListCreateWrongType" {
+  firrtl.module @ListCreateWrongType(
+      // expected-note @below {{prior use here}}
+      in %int: !firrtl.integer
+      ) {
+    // expected-error @below {{use of value '%int' expects different type than prior uses: '!firrtl.string' vs '!firrtl.integer'}}
+    firrtl.list.create %int : !firrtl.list<string>
+  }
+}
+
+// -----
+
+// Reject map.create with consistent but wrong key/value elements.
+firrtl.circuit "MapCreateWrongType" {
+  firrtl.module @MapCreateWrongType(
+      // expected-note @below {{prior use here}}
+      in %int: !firrtl.integer
+      ) {
+    // expected-error @below {{use of value '%int' expects different type than prior uses: '!firrtl.string' vs '!firrtl.integer'}}
+    firrtl.map.create (%int -> %int) : !firrtl.map<integer, string>
+  }
+}
+
+// -----
+
+// Reject list.create that doesn't create a list.
+firrtl.circuit "ListCreateNotList" {
+  firrtl.module @ListCreateNotList() {
+    // expected-error @below {{invalid kind of type specified}}
+    firrtl.list.create : !firrtl.string
+  }
 }
 
 // -----
@@ -1737,27 +1844,11 @@ firrtl.circuit "ConstOpenVector" {
 }
 
 // -----
-// Elements must support FieldID's.
-
-firrtl.circuit "OpenVectorNotFieldID" {
-  // expected-error @below {{vector element type does not support fieldID's, type: '!firrtl.string'}}
-  firrtl.extmodule @OpenVectorNotFieldID(out out : !firrtl.openvector<string, 2>)
-}
-
-// -----
 // No const with probes within.
 
 firrtl.circuit "ConstOpenBundle" {
   // expected-error @below {{'const' bundle cannot have references, but element "x" has type '!firrtl.probe<uint<1>>'}}
   firrtl.extmodule @ConstOpenBundle(out out : !firrtl.const.openbundle<x: probe<uint<1>>>)
-}
-
-// -----
-// Elements must support FieldID's.
-
-firrtl.circuit "OpenBundleNotFieldID" {
-  // expected-error @below {{bundle element "a" has unsupported type that does not support fieldID's: '!firrtl.string'}}
-  firrtl.extmodule @OpenBundleNotFieldID(out out : !firrtl.openbundle<a: string>)
 }
 
 // -----
@@ -1776,27 +1867,6 @@ firrtl.circuit "NonEquivalenctStrictConnect" {
 // expected-error @below {{'firrtl.circuit' op must have a non-class top module}}
 firrtl.circuit "TopModuleIsClass" {
   firrtl.class @TopModuleIsClass() {}
-}
-
-// -----
-
-firrtl.circuit "PathNonLocalTarget" {
-  firrtl.module @Other() {
-    %w = firrtl.wire sym @x : !firrtl.uint<1>
-  }
-  firrtl.module @PathNonLocalTarget() {
-    // expected-error @below {{op has non-local target}}
-    %rw = firrtl.path <@Other::@x>
-  }
-}
-
-// -----
-
-firrtl.circuit "PathBadTarget" {
-  firrtl.module @PathBadTarget() {
-    // expected-error @below {{has target that cannot be resolved: #hw.innerNameRef<@PathBadTarget::@x>}}
-    %rw = firrtl.path <@PathBadTarget::@x>
-  }
 }
 
 // -----
@@ -2071,5 +2141,127 @@ firrtl.circuit "ObjectFieldDoesntExist" {
     %0 = firrtl.object @MyClass(out str: !firrtl.string)
     // expected-error @below {{'firrtl.object.subfield' unknown field bad_field in class type '!firrtl.class<@MyClass(out str: !firrtl.string)>'}}
     %1 = firrtl.object.subfield %0[bad_field] : !firrtl.class<@MyClass(out str: !firrtl.string)>
+  }
+}
+
+// -----
+
+firrtl.circuit "WrongInternalPathCount" {
+  // expected-error @below {{module has inconsistent internal path array with 1 entries for 0 ports}}
+  firrtl.extmodule @WrongInternalPathCount() attributes { internalPaths = [ #firrtl.internalpath ] }
+}
+
+// -----
+
+firrtl.circuit "InternalPathForNonRefType" {
+  // expected-error @below {{module has internal path for non-ref-type port "in"}}
+  firrtl.extmodule @WrongInternalPathCount(
+    // expected-note @below {{this port}}
+    in in : !firrtl.uint<1>
+    ) attributes { internalPaths = [ #firrtl.internalpath<"x.y"> ] }
+}
+
+// -----
+// Try to read from an output object's input ports.
+
+firrtl.circuit "Top" {
+  firrtl.class @MyClass(in %input: !firrtl.string) {}
+
+  firrtl.module @Top(out %object: !firrtl.class<@MyClass(in input : !firrtl.string)>,  out %str: !firrtl.string) {
+    // expected-note @below {{the source was defined here}}
+    %0 = firrtl.object.subfield %object[input] : !firrtl.class<@MyClass(in input: !firrtl.string)>
+    // expected-error @below {{connect has invalid flow: the source expression has no flow, expected source or duplex flow}}
+    firrtl.propassign %str, %0 : !firrtl.string
+  }
+}
+
+// -----
+// Try to assign to an output object's inputs. This fails because we can only
+// assign to the input ports of a local object declaration. An output object
+// must be wholly assigned.
+
+firrtl.circuit "Top" {
+  firrtl.class @MyClass(in %input: !firrtl.string) {}
+
+  firrtl.module @Top(out %port: !firrtl.class<@MyClass(in input : !firrtl.string)>) {
+    %0 = firrtl.string "foo"
+    // expected-note @below {{the destination was defined here}}
+    %1 = firrtl.object.subfield %port[input] : !firrtl.class<@MyClass(in input: !firrtl.string)>
+    // expected-error @below {{connect has invalid flow: the destination expression has no flow, expected sink or duplex flow}}
+    firrtl.propassign %1, %0 : !firrtl.string
+  }
+}
+
+// -----
+// Try to assign to an input object's inputs.
+
+firrtl.circuit "Top" {
+  firrtl.class @MyClass(in %input: !firrtl.string) {}
+
+  firrtl.module @Top(out %port: !firrtl.class<@MyClass(in input : !firrtl.string)>) {
+    %0 = firrtl.string "foo"
+    // expected-note @below {{the destination was defined here}}
+    %1 = firrtl.object.subfield %port[input] : !firrtl.class<@MyClass(in input: !firrtl.string)>
+    // expected-error @below {{connect has invalid flow: the destination expression has no flow, expected sink or duplex flow}}
+    firrtl.propassign %1, %0 : !firrtl.string
+  }
+}
+
+// -----
+// Try to assign to the input port of an output object of a local object.
+// This fails because we can only assign directly to the ports of a local object
+// declaration.
+
+firrtl.circuit "Top" {
+  firrtl.class @B(in %input : !firrtl.string) {}
+
+  firrtl.class @A(out %b: !firrtl.class<@B(in input: !firrtl.string)>) {}
+
+  firrtl.module @Top(out %port: !firrtl.class<@MyClass(in input : !firrtl.string)>) {
+    %a = firrtl.object @A(out b: !firrtl.class<@B(in input: !firrtl.string)>)
+    %b = firrtl.object.subfield %a[b] : !firrtl.class<@A(out b: !firrtl.class<@B(in input: !firrtl.string)>)>
+    // expected-note @below {{the destination was defined here}}
+    %input = firrtl.object.subfield %b[input] : !firrtl.class<@B(in input: !firrtl.string)>
+    %value = firrtl.string "foo"
+    // expected-error @below {{connect has invalid flow: the destination expression has no flow, expected sink or duplex flow}}
+    firrtl.propassign %input, %value : !firrtl.string
+  }
+}
+
+// -----
+
+firrtl.circuit "InvalidBool" {
+  firrtl.module @InvalidBool() {
+     // expected-error @below {{invalid kind of attribute specified}}
+     %0 = firrtl.bool "invalid"
+  }
+}
+
+// -----
+
+firrtl.circuit "InvalidInnerSymTooHigh" {
+  firrtl.module @InvalidInnerSymTooHigh () {
+    // expected-error @below {{field id:'1' is greater than the maximum field id:'0'}}
+    %w = firrtl.wire sym [<@"test",1,public>] : !firrtl.uint<5>
+  }
+}
+
+// -----
+
+firrtl.circuit "InvalidInnerSymDupe" {
+  firrtl.module @InvalidInnerSymDupe() {
+    // expected-error @below {{op cannot assign multiple symbol names to the field id:'0'}}
+    %w = firrtl.wire sym [<@"foo",0,public>,<@"bar",0,public>] : !firrtl.uint<5>
+  }
+}
+
+// -----
+
+firrtl.circuit "InstanceOfClass" {
+  // expected-note @below {{class declared here}}
+  firrtl.class @A() {}
+  firrtl.module @InstanceOfClass() {
+    // expected-error @below {{op must instantiate a module not a class}}
+    firrtl.instance a @A()
   }
 }

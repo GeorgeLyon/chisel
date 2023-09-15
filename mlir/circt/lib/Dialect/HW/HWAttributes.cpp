@@ -239,7 +239,7 @@ void InnerRefAttr::print(AsmPrinter &p) const {
 }
 
 //===----------------------------------------------------------------------===//
-// InnerSymAttr
+// InnerSymAttr and InnerSymPropertiesAttr
 //===----------------------------------------------------------------------===//
 
 Attribute InnerSymPropertiesAttr::parse(AsmParser &parser, Type type) {
@@ -263,13 +263,22 @@ Attribute InnerSymPropertiesAttr::parse(AsmParser &parser, Type type) {
   if (parser.parseGreater())
     return Attribute();
 
-  return InnerSymPropertiesAttr::get(parser.getContext(), name, fieldId,
-                                     visibilityAttr);
+  return parser.getChecked<InnerSymPropertiesAttr>(parser.getContext(), name,
+                                                   fieldId, visibilityAttr);
 }
 
 void InnerSymPropertiesAttr::print(AsmPrinter &odsPrinter) const {
   odsPrinter << "<@" << getName().getValue() << "," << getFieldID() << ","
              << getSymVisibility().getValue() << ">";
+}
+
+LogicalResult InnerSymPropertiesAttr::verify(
+    ::llvm::function_ref<::mlir::InFlightDiagnostic()> emitError,
+    ::mlir::StringAttr name, uint64_t fieldID,
+    ::mlir::StringAttr symVisibility) {
+  if (!name || name.getValue().empty())
+    return emitError() << "inner symbol cannot have empty name";
+  return success();
 }
 
 StringAttr InnerSymAttr::getSymIfExists(uint64_t fieldId) const {
@@ -304,19 +313,24 @@ Attribute InnerSymAttr::parse(AsmParser &parser, Type type) {
   StringAttr sym;
   NamedAttrList dummyList;
   SmallVector<InnerSymPropertiesAttr, 4> names;
-  if (!parser.parseOptionalSymbolName(sym, "dummy", dummyList))
-    names.push_back(InnerSymPropertiesAttr::get(sym));
-  else if (parser.parseCommaSeparatedList(
-               OpAsmParser::Delimiter::Square, [&]() -> ParseResult {
-                 InnerSymPropertiesAttr prop;
-                 if (parser.parseCustomAttributeWithFallback(
-                         prop, mlir::Type{}, "dummy", dummyList))
-                   return failure();
+  if (!parser.parseOptionalSymbolName(sym, "dummy", dummyList)) {
+    auto prop = parser.getChecked<InnerSymPropertiesAttr>(
+        parser.getContext(), sym, 0,
+        StringAttr::get(parser.getContext(), "public"));
+    if (!prop)
+      return {};
+    names.push_back(prop);
+  } else if (parser.parseCommaSeparatedList(
+                 OpAsmParser::Delimiter::Square, [&]() -> ParseResult {
+                   InnerSymPropertiesAttr prop;
+                   if (parser.parseCustomAttributeWithFallback(
+                           prop, mlir::Type{}, "dummy", dummyList))
+                     return failure();
 
-                 names.push_back(prop);
+                   names.push_back(prop);
 
-                 return success();
-               }))
+                   return success();
+                 }))
     return Attribute();
 
   std::sort(names.begin(), names.end(),
@@ -988,6 +1002,29 @@ FailureOr<TypedAttr> hw::evaluateParametricAttr(Location loc,
   return TypedAttr();
 }
 
+template <typename TArray>
+FailureOr<Type> evaluateParametricArrayType(Location loc, ArrayAttr parameters,
+                                            TArray arrayType) {
+  auto size = evaluateParametricAttr(loc, parameters, arrayType.getSizeAttr());
+  if (failed(size))
+    return failure();
+  auto elementType =
+      evaluateParametricType(loc, parameters, arrayType.getElementType());
+  if (failed(elementType))
+    return failure();
+
+  // If the size was evaluated to a constant, use a 64-bit integer
+  // attribute version of it
+  if (auto intAttr = size->template dyn_cast<IntegerAttr>())
+    return TArray::get(
+        arrayType.getContext(), *elementType,
+        IntegerAttr::get(IntegerType::get(arrayType.getContext(), 64),
+                         intAttr.getValue().getSExtValue()));
+
+  // Otherwise parameter references are still involved
+  return TArray::get(arrayType.getContext(), *elementType, *size);
+}
+
 FailureOr<Type> hw::evaluateParametricType(Location loc, ArrayAttr parameters,
                                            Type type) {
   return llvm::TypeSwitch<Type, FailureOr<Type>>(type)
@@ -1005,27 +1042,10 @@ FailureOr<Type> hw::evaluateParametricType(Location loc, ArrayAttr parameters,
         // Otherwise parameter references are still involved
         return hw::IntType::get(evaluatedWidth->cast<TypedAttr>());
       })
-      .Case<hw::ArrayType>([&](hw::ArrayType arrayType) -> FailureOr<Type> {
-        auto size =
-            evaluateParametricAttr(loc, parameters, arrayType.getSizeAttr());
-        if (failed(size))
-          return failure();
-        auto elementType =
-            evaluateParametricType(loc, parameters, arrayType.getElementType());
-        if (failed(elementType))
-          return failure();
-
-        // If the size was evaluated to a constant, use a 64-bit integer
-        // attribute version of it
-        if (auto intAttr = size->dyn_cast<IntegerAttr>())
-          return hw::ArrayType::get(
-              arrayType.getContext(), *elementType,
-              IntegerAttr::get(IntegerType::get(type.getContext(), 64),
-                               intAttr.getValue().getSExtValue()));
-
-        // Otherwise parameter references are still involved
-        return hw::ArrayType::get(arrayType.getContext(), *elementType, *size);
-      })
+      .Case<hw::ArrayType, hw::UnpackedArrayType>(
+          [&](auto arrayType) -> FailureOr<Type> {
+            return evaluateParametricArrayType(loc, parameters, arrayType);
+          })
       .Default([&](auto) { return type; });
 }
 
@@ -1044,7 +1064,7 @@ bool hw::isParametricType(mlir::Type t) {
   return llvm::TypeSwitch<Type, bool>(t)
       .Case<hw::IntType>(
           [&](hw::IntType t) { return isParamAttrWithParamRef(t.getWidth()); })
-      .Case<hw::ArrayType>([&](hw::ArrayType arrayType) {
+      .Case<hw::ArrayType, hw::UnpackedArrayType>([&](auto arrayType) {
         return isParametricType(arrayType.getElementType()) ||
                isParamAttrWithParamRef(arrayType.getSizeAttr());
       })

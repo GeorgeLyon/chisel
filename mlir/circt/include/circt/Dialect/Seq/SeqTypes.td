@@ -10,6 +10,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifndef CIRCT_DIALECT_SEQ_SEQTYPES
+#define CIRCT_DIALECT_SEQ_SEQTYPES
+
+include "circt/Dialect/Seq/SeqDialect.td"
 include "mlir/IR/BuiltinTypeInterfaces.td"
 
 class SeqType<string name, list<Trait> traits = []> : TypeDef<SeqDialect, name, traits> { }
@@ -27,7 +31,7 @@ def HLMemType : SeqType<"HLMem",[
     The HLMemType represents the type of an addressable memory structure. The
     type is inherently multidimensional. Dimensions must be known integer values.
 
-    Note: unidimensional memories are represented as <1x{element type}> - 
+    Note: unidimensional memories are represented as <1x{element type}> -
     <{element type}> is illegal.
   }];
 
@@ -79,3 +83,18 @@ def FirMemType : SeqType<"FirMem"> {
   );
   let assemblyFormat = "`<` $depth `x` $width (`,` `mask` $maskWidth^)? `>`";
 }
+
+def ClockType : SeqType<"Clock"> {
+  let summary = "A type for clock-carrying wires";
+  let description = [{
+    The `!seq.clock` type represents signals which can be used to drive the
+    clock input of sequential operations.
+  }];
+  let mnemonic = "clock";
+}
+
+// Transitional type to allow both `i1` and `seq.clock` to be used as a clock.
+def ClockOrI1Type : DialectType<SeqDialect,
+    CPred<"::circt::seq::isClockOrI1Type($_self)">, "a clock type">;
+
+#endif // CIRCT_DIALECT_SEQ_SEQTYPES

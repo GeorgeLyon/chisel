@@ -13,7 +13,7 @@
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/DialectImplementation.h"
-#include "mlir/IR/FunctionImplementation.h"
+#include "mlir/Interfaces/FunctionImplementation.h"
 
 using namespace circt;
 using namespace circt::hw;
@@ -68,6 +68,33 @@ parseFunctionResultList(OpAsmParser &parser,
                                         parseElt);
 }
 
+/// Return the port name for the specified argument or result.
+static StringRef getModuleArgumentName(Operation *module, size_t argNo) {
+  if (auto mod = dyn_cast<HWModuleLike>(module)) {
+    if (argNo < mod.getNumInputPorts())
+      return mod.getInputName(argNo);
+    return StringRef();
+  }
+  auto argNames = module->getAttrOfType<ArrayAttr>("argNames");
+  // Tolerate malformed IR here to enable debug printing etc.
+  if (argNames && argNo < argNames.size())
+    return argNames[argNo].cast<StringAttr>().getValue();
+  return StringRef();
+}
+
+static StringRef getModuleResultName(Operation *module, size_t resultNo) {
+  if (auto mod = dyn_cast<HWModuleLike>(module)) {
+    if (resultNo < mod.getNumOutputPorts())
+      return mod.getOutputName(resultNo);
+    return StringRef();
+  }
+  auto resultNames = module->getAttrOfType<ArrayAttr>("resultNames");
+  // Tolerate malformed IR here to enable debug printing etc.
+  if (resultNames && resultNo < resultNames.size())
+    return resultNames[resultNo].cast<StringAttr>().getValue();
+  return StringRef();
+}
+
 void module_like_impl::printModuleSignature(OpAsmPrinter &p, Operation *op,
                                             ArrayRef<Type> argTypes,
                                             bool isVariadic,
@@ -80,21 +107,37 @@ void module_like_impl::printModuleSignature(OpAsmPrinter &p, Operation *op,
   SmallString<32> resultNameStr;
   mlir::OpPrintingFlags flags;
 
-  auto funcOp = cast<mlir::FunctionOpInterface>(op);
+  // Handle either old FunctionOpInterface modules or new-style hwmodulelike
+  // This whole thing should be split up into two functions, but the delta is
+  // so small, we are leaving this for now.
+  auto modOp = dyn_cast<hw::HWModuleLike>(op);
+  auto funcOp = dyn_cast<mlir::FunctionOpInterface>(op);
+  SmallVector<Attribute> inputAttrs, outputAttrs;
+  if (funcOp) {
+    if (auto args = funcOp.getAllArgAttrs())
+      for (auto a : args.getValue())
+        inputAttrs.push_back(a);
+    inputAttrs.resize(funcOp.getNumArguments());
+    if (auto results = funcOp.getAllResultAttrs())
+      for (auto a : results.getValue())
+        outputAttrs.push_back(a);
+    outputAttrs.resize(funcOp.getNumResults());
+  } else {
+    inputAttrs = modOp.getAllInputAttrs();
+    outputAttrs = modOp.getAllOutputAttrs();
+  }
 
   p << '(';
   for (unsigned i = 0, e = argTypes.size(); i < e; ++i) {
     if (i > 0)
       p << ", ";
 
-    auto argName = getModuleArgumentName(op, i);
-
+    auto argName = modOp ? modOp.getInputName(i) : getModuleArgumentName(op, i);
     if (!isExternal) {
       // Get the printed format for the argument name.
       resultNameStr.clear();
       llvm::raw_svector_ostream tmpStream(resultNameStr);
       p.printOperand(body.front().getArgument(i), tmpStream);
-
       // If the name wasn't printable in a way that agreed with argName, make
       // sure to print out an explicit argNames attribute.
       if (tmpStream.str().drop_front() != argName)
@@ -106,14 +149,19 @@ void module_like_impl::printModuleSignature(OpAsmPrinter &p, Operation *op,
     }
 
     p.printType(argTypes[i]);
-    p.printOptionalAttrDict(getArgAttrs(funcOp, i));
+    auto inputAttr = inputAttrs[i];
+    p.printOptionalAttrDict(inputAttr
+                                ? cast<DictionaryAttr>(inputAttr).getValue()
+                                : ArrayRef<NamedAttribute>());
 
     // TODO: `printOptionalLocationSpecifier` will emit aliases for locations,
     // even if they are not printed.  This will have to be fixed upstream.  For
     // now, use what was specified on the command line.
-    if (flags.shouldPrintDebugInfo())
-      if (auto loc = getModuleArgumentLocAttr(op, i))
+    if (flags.shouldPrintDebugInfo()) {
+      auto loc = modOp.getInputLoc(i);
+      if (!isa<UnknownLoc>(loc))
         p.printOptionalLocationSpecifier(loc);
+    }
   }
 
   if (isVariadic) {
@@ -130,17 +178,22 @@ void module_like_impl::printModuleSignature(OpAsmPrinter &p, Operation *op,
     for (size_t i = 0, e = resultTypes.size(); i < e; ++i) {
       if (i != 0)
         p << ", ";
-      p.printKeywordOrString(getModuleResultNameAttr(op, i).getValue());
+      p.printKeywordOrString(getModuleResultName(op, i));
       p << ": ";
       p.printType(resultTypes[i]);
-      p.printOptionalAttrDict(getResultAttrs(funcOp, i));
+      auto outputAttr = outputAttrs[i];
+      p.printOptionalAttrDict(outputAttr
+                                  ? cast<DictionaryAttr>(outputAttr).getValue()
+                                  : ArrayRef<NamedAttribute>());
 
       // TODO: `printOptionalLocationSpecifier` will emit aliases for locations,
       // even if they are not printed.  This will have to be fixed upstream. For
       // now, use what was specified on the command line.
-      if (flags.shouldPrintDebugInfo())
-        if (auto loc = getModuleResultLocAttr(op, i))
+      if (flags.shouldPrintDebugInfo()) {
+        auto loc = modOp.getOutputLoc(i);
+        if (!isa<UnknownLoc>(loc))
           p.printOptionalLocationSpecifier(loc);
+      }
     }
     p << ')';
   }

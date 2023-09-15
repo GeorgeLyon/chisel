@@ -457,7 +457,8 @@ static void createResumeEntryBlock(Function &F, coro::Shape &Shape) {
     Switch->addCase(IndexVal, ResumeBB);
 
     cast<BranchInst>(SuspendBB->getTerminator())->setSuccessor(0, LandingBB);
-    auto *PN = PHINode::Create(Builder.getInt8Ty(), 2, "", &LandingBB->front());
+    auto *PN = PHINode::Create(Builder.getInt8Ty(), 2, "");
+    PN->insertBefore(LandingBB->begin());
     S->replaceAllUsesWith(PN);
     PN->addIncoming(Builder.getInt8(-1), SuspendBB);
     PN->addIncoming(S, ResumeBB);
@@ -701,8 +702,13 @@ void CoroCloner::salvageDebugInfo() {
   SmallVector<DbgVariableIntrinsic *, 8> Worklist =
       collectDbgVariableIntrinsics(*NewF);
   SmallDenseMap<Argument *, AllocaInst *, 4> ArgToAllocaMap;
+
+  // Only 64-bit ABIs have a register we can refer to with the entry value.
+  bool UseEntryValue =
+      llvm::Triple(OrigF.getParent()->getTargetTriple()).isArch64Bit();
   for (DbgVariableIntrinsic *DVI : Worklist)
-    coro::salvageDebugInfo(ArgToAllocaMap, DVI, Shape.OptimizeFrame);
+    coro::salvageDebugInfo(ArgToAllocaMap, DVI, Shape.OptimizeFrame,
+                           UseEntryValue);
 
   // Remove all salvaged dbg.declare intrinsics that became
   // either unreachable or stale due to the CoroSplit transformation.
@@ -1995,7 +2001,8 @@ splitCoroutine(Function &F, SmallVectorImpl<Function *> &Clones,
   // coroutine funclets.
   SmallDenseMap<Argument *, AllocaInst *, 4> ArgToAllocaMap;
   for (auto *DDI : collectDbgVariableIntrinsics(F))
-    coro::salvageDebugInfo(ArgToAllocaMap, DDI, Shape.OptimizeFrame);
+    coro::salvageDebugInfo(ArgToAllocaMap, DDI, Shape.OptimizeFrame,
+                           false /*UseEntryValue*/);
 
   return Shape;
 }
