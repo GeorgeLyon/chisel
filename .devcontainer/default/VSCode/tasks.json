@@ -8,7 +8,7 @@
 			"targets": [
 				"MLIRJNI",
 				"mlir-bindings-support-test",
-				"mlir-bindings-jni-test",
+				"mlir-bindings-jni-test"
 			],
 			"group": {
 				"kind": "build",
