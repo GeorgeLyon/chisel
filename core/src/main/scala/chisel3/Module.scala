@@ -16,6 +16,7 @@ import chisel3.reflect.DataMirror
 import _root_.firrtl.annotations.{IsModule, ModuleName, ModuleTarget}
 import _root_.firrtl.AnnotationSeq
 import chisel3.internal.plugin.autoNameRecursively
+import chisel3.util.simpleClassName
 
 object Module extends SourceInfoDoc {
 
@@ -392,6 +393,20 @@ package experimental {
     /** Internal check if a Module's constructor has finished executing */
     private[chisel3] def isClosed = _closed
 
+    /** Mutable state that indicates if IO is allowed to be created for this module.
+      * This can be used for advanced Chisel library APIs that want to limit
+      * what IO is allowed to be created for a module.
+      */
+    private var _isIOCreationAllowed = true
+
+    /** If true, then this module is allowed to have user-created IO. */
+    private[chisel3] def isIOCreationAllowed = _isIOCreationAllowed
+
+    /** Disallow any more IO creation for this module. */
+    private[chisel3] def disallowIOCreation(): Unit = {
+      _isIOCreationAllowed = false
+    }
+
     private[chisel3] var toDefinitionCalled:  Option[SourceInfo] = None
     private[chisel3] var modulePortsAskedFor: Option[SourceInfo] = None
 
@@ -504,21 +519,7 @@ package experimental {
       *
       * @note If you want a custom or parametric name, override this method.
       */
-    def desiredName: String = {
-      /* The default module name is derived from the Java reflection derived class name. */
-      val baseName = this.getClass.getName
-
-      /* A sequence of string filters applied to the name */
-      val filters: Seq[String => String] =
-        Seq(((a: String) => raw"\$$+anon".r.replaceAllIn(a, "_Anon")) // Merge the "$$anon" name with previous name
-        )
-
-      filters
-        .foldLeft(baseName) { case (str, filter) => filter(str) } // 1. Apply filters to baseName
-        .split("\\.|\\$") // 2. Split string at '.' or '$'
-        .filterNot(_.forall(_.isDigit)) // 3. Drop purely numeric names
-        .last // 4. Use the last name
-    }
+    def desiredName: String = simpleClassName(this.getClass)
 
     /** Legalized name of this module. */
     final lazy val name =
