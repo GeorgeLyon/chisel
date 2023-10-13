@@ -1,6 +1,7 @@
 out/
 generated/
 /lib/firrtl.jar
+/build
 .classpath
 .idea
 .idea_modules/
@@ -10,7 +11,7 @@ target/
 *.swp
 *.fir
 *.v
-*.json
+*.sv
 test_run_dir
 *~
 \#*\#
@@ -21,3 +22,7 @@ test_run_dir
 metals.sbt
 version.txt
 .bsp
+/.vscode
+/_mlir
+/_llvm
+/_circt

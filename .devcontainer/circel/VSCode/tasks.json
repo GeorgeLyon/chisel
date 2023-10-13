@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "cmake",
+      "label": "Build CIRCEL",
+      "command": "build",
+      "targets": [
+        "MLIRIR",
+        "circt-lsp-server",
+        "firtool"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [ ]
+    },
+    {
+      "type": "cmake",
+      "label": "Test CIRCEL",
+      "command": "build",
+      "targets": [
+        "check-circt"
+      ],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": [ ]
+    }
+  ]
+}

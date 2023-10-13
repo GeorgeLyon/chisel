@@ -1,0 +1,37 @@
+# This file allows users to call find_package(CIRCEL) and pick up our targets.
+
+@CIRCEL_CONFIG_CODE@
+
+find_package(MLIR REQUIRED CONFIG
+             HINTS "@CIRCEL_CONFIG_MLIR_CMAKE_DIR@")
+
+set(CIRCEL_EXPORTED_TARGETS "@CIRCEL_EXPORTS@")
+set(CIRCEL_CMAKE_DIR "@CIRCEL_CONFIG_CMAKE_DIR@")
+set(CIRCEL_BINARY_DIR "@CIRCEL_CONFIG_BINARY_DIR@")
+set(CIRCEL_INCLUDE_DIRS "@CIRCEL_CONFIG_INCLUDE_DIRS@")
+set(CIRCEL_LIBRARY_DIRS "@CIRCEL_CONFIG_LIBRARY_DIRS@")
+set(CIRCEL_TOOLS_DIR "@CIRCEL_CONFIG_TOOLS_DIR@")
+
+set_property(GLOBAL PROPERTY CIRCEL_ALL_LIBS "@CIRCEL_ALL_LIBS@")
+set_property(GLOBAL PROPERTY CIRCEL_DIALECT_LIBS "@CIRCEL_DIALECT_LIBS@")
+set_property(GLOBAL PROPERTY CIRCEL_CONVERSION_LIBS "@CIRCEL_CONVERSION_LIBS@")
+set_property(GLOBAL PROPERTY CIRCEL_TRANSLATION_LIBS "@CIRCEL_TRANSLATION_LIBS@")
+
+# Provide all our library targets to users.
+@CIRCEL_CONFIG_INCLUDE_EXPORTS@
+
+# By creating these targets here, subprojects that depend on CIRCEL's
+# tablegen-generated headers can always depend on these targets whether building
+# in-tree with CIRCEL or not.
+if(NOT TARGET circel-tablegen-targets)
+  add_custom_target(circel-tablegen-targets)
+endif()
+if(NOT TARGET circel-headers)
+  add_custom_target(circel-headers)
+endif()
+if(NOT TARGET circel-generic-headers)
+  add_custom_target(circel-generic-headers)
+endif()
+if(NOT TARGET circel-doc)
+  add_custom_target(circel-doc)
+endif()
