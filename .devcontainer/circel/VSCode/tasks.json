@@ -8,7 +8,9 @@
       "targets": [
         "MLIRIR",
         "circel-lsp-server",
-        "firtool"
+        "firtool",
+        "circel-bindings-swift-test",
+        "circel-bindings-support-test"
       ],
       "group": {
         "kind": "build",

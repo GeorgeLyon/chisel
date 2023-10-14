@@ -24,8 +24,10 @@
 
     // LLVM (performance)
     "-DLLVM_USE_LINKER=lld-17",
-    "-DLLVM_OPTIMIZED_TABLEGEN=ON",
-    "-DLLVM_USE_SPLIT_DWARF=ON",
+
+    // Temporarily disabled (https://github.com/llvm/llvm-project/pull/67247)
+    "-DLLVM_OPTIMIZED_TABLEGEN=OFF",
+    "-DLLVM_USE_SPLIT_DWARF=OFF",
 
     // CIRCT/CIRCEL
     "-DLLVM_EXTERNAL_PROJECTS=circt;circel",

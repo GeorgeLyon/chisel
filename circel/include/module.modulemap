@@ -1,0 +1,6 @@
+module CIRCEL_Bindings_Support {
+  requires cplusplus
+
+  umbrella "circel/Bindings/Support"
+  module * { export * }
+}

@@ -28,6 +28,9 @@ ENV \
     LD_LIBRARY_PATH=/graalvm/lib/server:$LD_LIBRARY_PATH \
     PATH=/graalvm/bin/:$PATH \
     #
+    # Setup Swift
+    SWIFTC=/swift/usr/bin/swiftc \
+    #
     # Disable Chisel argument extensions (which break interactive testing via bloop)
     CHISEL_ARGUMENT_EXTENSIONS=DISABLE \
     #
