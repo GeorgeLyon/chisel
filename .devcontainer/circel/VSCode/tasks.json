@@ -21,8 +21,7 @@
       "label": "Test CIRCEL",
       "command": "build",
       "targets": [
-        "check-circt-firtool",
-        "check-circt-dialect-firrtl"
+        "firtool"
       ],
       "group": {
         "kind": "test",
