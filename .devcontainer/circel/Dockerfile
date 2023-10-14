@@ -70,6 +70,24 @@ RUN \
       lld-$CLANG_VERSION \
       lldb-$CLANG_VERSION \
       jq \
+      # 
+      # Swift dependencies
+      binutils \
+      git \
+      gnupg2 \
+      libc6-dev \
+      libcurl4-openssl-dev \
+      libedit2 \
+      libgcc-9-dev \
+      libpython3.8 \
+      libsqlite3-0 \
+      libstdc++-9-dev \
+      libxml2-dev \
+      libz3-dev \
+      pkg-config \
+      tzdata \
+      unzip \
+      zlib1g-dev \
       #
       # ShellCheck is useful for validating bash scripts
       shellcheck \
@@ -83,7 +101,12 @@ RUN \
     curl -sL https://github.com/graalvm/graalvm-ce-builds/releases/download/vm-22.3.1/graalvm-ce-$JAVA_VERSION-linux-$(arch | sed s/x86_64/amd64/)-22.3.1.tar.gz | tar -xz -C /graalvm --strip-components=1 && \
     #
     # Install Scala (SBT)
-    curl -sL https://github.com/sbt/sbt/releases/download/v1.9.6/sbt-1.9.6.tgz | tar xz --strip-components=1 -C /usr &&  \
+    curl -sL https://github.com/sbt/sbt/releases/download/v1.9.6/sbt-1.9.6.tgz | tar xz --strip-components=1 -C /usr && \
+    #
+    # Install Swift
+    mkdir /swift && \
+    curl -sL https://download.swift.org/swift-5.9-release/ubuntu2204-$(arch)/swift-5.9-RELEASE/swift-5.9-RELEASE-ubuntu22.04-$(arch).tar.gz | tar xz --strip-components=1 -C /swift && \
+    ln -s /swift/usr/bin/swift /usr/bin/swift && \
     #
     # Grab CIRCT Sources from GitHub to avoid cloning all of LLVM
     export PINNED_URL_FRAGMENT=${PINNED_CIRCT_VERSION:+download/$PINNED_CIRCT_VERSION} && \
