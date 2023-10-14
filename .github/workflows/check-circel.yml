@@ -37,7 +37,7 @@ jobs:
             echo "Done."
 
       - name: Get cache key parts
-        id: get-dependency-hashes
+        id: get-cache-key-parts
         uses: devcontainers/ci@v0.3
         with:
           # We configure ccache to not evict anything during compilation, and we perform a cleanup after compilation completes
@@ -47,17 +47,19 @@ jobs:
             echo "llvm-hash=$LLVM_HASH" >> $GITHUB_OUTPUT
             CIRCT_HASH=$(find /circt -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum)
             echo "circt-hash=$CIRCT_HASH" >> $GITHUB_OUTPUT
+            . /etc/lsb-release
+            echo "ubuntu-codename=$DISTRIB_CODENAME" >> $GITHUB_OUTPUT
 
       - name: Restore ccache database
         uses: actions/cache/restore@v3
         with: 
           path: ccache
-          key: circel-ccache-database-${{ steps.get-dependency-hashes.outputs.llvm-hash }}-${{ steps.get-dependency-hashes.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('circel-core/**') }}
+          key: circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('circel-core/**') }}
           restore-keys: |
-            circel-ccache-database-${{ steps.get-dependency-hashes.outputs.llvm-hash }}-${{ steps.get-dependency-hashes.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-
-            circel-ccache-database-${{ steps.get-dependency-hashes.outputs.llvm-hash }}-${{ steps.get-dependency-hashes.outputs.circt-hash }}-
-            circel-ccache-database-${{ steps.get-dependency-hashes.outputs.llvm-hash }}-
-            circel-ccache-database-
+            circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-
+            circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-
+            circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-
+            circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}
       
       - name: Configure CMake Project
         uses: devcontainers/ci@v0.3
@@ -107,7 +109,7 @@ jobs:
         if: steps.check-targets.outcome == 'success'
         with: 
           path: ccache
-          key: circel-ccache-database-${{ steps.get-dependency-hashes.outputs.llvm-hash }}-${{ steps.get-dependency-hashes.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('./**') }}
+          key: circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('./**') }}
       # If evicting everything that wasn't used this workflow does not reduce the cache past its maximum, it may benefit performance to increase the cache size.
       - name: Log ccache estimated usage
         uses: devcontainers/ci@v0.3
