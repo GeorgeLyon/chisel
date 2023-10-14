@@ -1,5 +1,4 @@
-# add_subdirectory(Bindings)
-# add_subdirectory(Dialect)
+add_subdirectory(Bindings)
 
 # Get the classpath as an argument
 get_property(MLIR_JAVA_CLASSPATH GLOBAL PROPERTY MLIR_JAVA_CLASSPATH)
@@ -15,6 +14,7 @@ configure_lit_site_cfg(
 add_lit_testsuite(check-circel "Running the CIRCEL regression tests"
   ${CMAKE_CURRENT_BINARY_DIR}
   DEPENDS 
-    FileCheck
+    FileCheck count not
+    circel-bindings-support-test
   )
 set_target_properties(check-circel PROPERTIES FOLDER "Tests")

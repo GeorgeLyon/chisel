@@ -16,6 +16,7 @@
     "source=shared-llvm-ccache-config,target=/root/.config/ccache,type=volume"
   ],
   "remoteEnv": {
+    "LOCAL_WORKSPACE_FOLDER": "${localWorkspaceFolder}",
     "PATH": "${containerWorkspaceFolder}/build/circel/bin:${containerEnv:PATH}"
   },
   "customizations": {

@@ -11,7 +11,7 @@
     "-DCMAKE_WARN_DEPRECATED=OFF",
     "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
     "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
-    
+
     // LLVM
     "-DLLVM_ENABLE_ASSERTIONS=ON",
     "-DLLVM_ENABLE_PROJECTS=mlir",
@@ -39,8 +39,12 @@
   "clangd.checkUpdates": false,
   "clangd.onConfigChanged": "restart",
   "clangd.arguments": [
+    "--all-scopes-completion",
     "--compile-commands-dir=${workspaceFolder}/build/circel",
-    "--header-insertion=never"
+    "--header-insertion=never",
+    "--clang-tidy",
+    "--clang-tidy-checks=*",
+    "--pch-storage=memory"
   ],
 
   // -- MLIR LSP Server

@@ -1,1 +1,1 @@
-add_subdirectory(Stub)
+add_subdirectory(Bindings)

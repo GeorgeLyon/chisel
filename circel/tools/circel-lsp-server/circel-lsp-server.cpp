@@ -1,7 +1,7 @@
-#include "circt/Dialect/FIRRTL/FIRRTLDialect.h"
-#include "mlir/IR/MLIRContext.h"
-#include "mlir/Tools/mlir-lsp-server/MlirLspServerMain.h"
 #include <circt/Dialect/Comb/CombDialect.h>
+#include <circt/Dialect/FIRRTL/FIRRTLDialect.h>
+#include <mlir/IR/MLIRContext.h>
+#include <mlir/Tools/mlir-lsp-server/MlirLspServerMain.h>
 
 using namespace circt;
 

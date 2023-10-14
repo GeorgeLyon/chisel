@@ -66,6 +66,7 @@ RUN \
       clang-$CLANG_VERSION \
       clang-tools-$CLANG_VERSION \
       clang-format-$CLANG_VERSION \
+      clang-tidy-$CLANG_VERSION \
       clangd-$CLANG_VERSION \
       lld-$CLANG_VERSION \
       lldb-$CLANG_VERSION \
@@ -137,7 +138,7 @@ RUN \
     apt autoremove -y && \
     rm /usr/bin/clang-cl-$CLANG_VERSION && \
     #
-    # Verilator hardcodes "g++" as the C++ compiler, so we symlink clang++ to g++ to avoid installing gcc
+    # Verilator hardcodes "g++" as the C++ compiler, so we symlink clang++ to g++ to avoid having gcc installed
     cd /usr/bin && ln -s clang++-$CLANG_VERSION g++ && \
     #
     # Based on the container mode, either remove unnecessary packages or install additional developer-oriented packages

@@ -21,7 +21,7 @@
       "label": "Test CIRCEL",
       "command": "build",
       "targets": [
-        "firtool"
+        "check-circel"
       ],
       "group": {
         "kind": "test",
