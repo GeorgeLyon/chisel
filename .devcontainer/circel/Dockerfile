@@ -105,7 +105,19 @@ RUN \
     #
     # Install Swift
     mkdir /swift && \
-    curl -sL https://download.swift.org/swift-5.9-release/ubuntu2204-$(arch)/swift-5.9-RELEASE/swift-5.9-RELEASE-ubuntu22.04-$(arch).tar.gz | tar xz --strip-components=1 -C /swift && \
+    case $TARGETARCH in \
+      "amd64") \
+        export SWIFT_URL=https://download.swift.org/swift-5.9-release/ubuntu2204/swift-5.9-RELEASE/swift-5.9-RELEASE-ubuntu22.04.tar.gz \
+        ;; \
+      "arm64") \
+        export SWIFT_URL=https://download.swift.org/swift-5.9-release/ubuntu2204-aarch64/swift-5.9-RELEASE/swift-5.9-RELEASE-ubuntu22.04-aarch64.tar.gz \
+        ;; \
+      *) \
+        echo "Unsupported TARGETARCH: $TARGETARCH" && \
+        exit 1 \
+        ;; \
+    esac && \
+    curl -sL "$SWIFT_URL" | tar xz --strip-components=1 -C /swift && \
     ln -s /swift/usr/bin/swift /usr/bin/swift && \
     #
     # Grab CIRCT Sources from GitHub to avoid cloning all of LLVM
