@@ -52,7 +52,7 @@ if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
   endif ()
 
 #-------------------------------------------------------------------------------
-# MLIR/LLVM Configuration
+# CIRCT/MLIR/LLVM Configuration
 #-------------------------------------------------------------------------------
 
   find_package(MLIR REQUIRED CONFIG)
@@ -77,6 +77,9 @@ if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
   set(MLIR_JNI_LIB_DIR "${CMAKE_CURRENT_BINARY_DIR}/lib")
 else()
   # CIRCEL is being built as an LLVM_EXTERNAL_PROJECT
+
+  # -- MLIR Configuration
+
   set(MLIR_MAIN_SRC_DIR ${LLVM_MAIN_SRC_DIR}/../mlir ) # --src-root
   set(MLIR_INCLUDE_DIR ${MLIR_MAIN_SRC_DIR}/include ) # --includedir
   set(MLIR_TABLEGEN_OUTPUT_DIR ${LLVM_BINARY_DIR}/tools/mlir/include)
@@ -87,6 +90,14 @@ else()
   set(BACKEND_PACKAGE_STRING "${PACKAGE_STRING}")
 
   set(MLIR_JNI_LIB_DIR "${LLVM_BINARY_DIR}/lib")
+
+  # -- CIRCT Configuration
+
+  set(CIRCT_MAIN_SRC_DIR ${LLVM_EXTERNAL_CIRCT_SOURCE_DIR})
+  set(CIRCT_INCLUDE_DIR ${CIRCT_MAIN_SRC_DIR}/include)
+  set(CIRCT_TABLEGEN_OUTPUT_DIR ${CMAKE_BINARY_DIR}/tools/circt/include)
+  include_directories(SYSTEM ${CIRCT_INCLUDE_DIR})
+  include_directories(SYSTEM ${CIRCT_TABLEGEN_OUTPUT_DIR})
 endif()
 
 # Define the default arguments to use with 'lit', and an option for the user to
@@ -152,8 +163,7 @@ set(CIRCEL_RELEASE_TAG "circel" CACHE STRING
 
 add_subdirectory(lib)
 if(CIRCEL_INCLUDE_TOOLS)
-  # We don't currently have any tools
-  # add_subdirectory(tools)
+  add_subdirectory(tools)
 endif()
 add_subdirectory(test)
 

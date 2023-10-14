@@ -7,7 +7,7 @@
       "command": "build",
       "targets": [
         "MLIRIR",
-        "circt-lsp-server",
+        "circel-lsp-server",
         "firtool"
       ],
       "group": {
@@ -21,7 +21,8 @@
       "label": "Test CIRCEL",
       "command": "build",
       "targets": [
-        "check-circt"
+        "check-circt-firtool",
+        "check-circt-dialect-firrtl"
       ],
       "group": {
         "kind": "test",
