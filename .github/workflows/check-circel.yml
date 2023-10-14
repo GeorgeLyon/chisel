@@ -31,7 +31,6 @@ jobs:
       - name: Initialize devcontainer
         uses: devcontainers/ci@v0.3
         with:
-          # We configure ccache to not evict anything during compilation, and we perform a cleanup after compilation completes
           push: never
           runCmd: |
             echo "Done."
@@ -40,7 +39,6 @@ jobs:
         id: get-cache-key-parts
         uses: devcontainers/ci@v0.3
         with:
-          # We configure ccache to not evict anything during compilation, and we perform a cleanup after compilation completes
           push: never
           runCmd: |
             LLVM_HASH=$(find /llvm -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum)
@@ -61,6 +59,18 @@ jobs:
             circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-
             circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}
       
+      - name: Initialize ccache
+        uses: devcontainers/ci@v0.3
+        with:
+          # We configure ccache to not evict anything during compilation, and we perform a cleanup after compilation completes
+          push: never
+          runCmd: |
+            date +%s > .workflow-start-seconds
+            export CCACHE_DIR=$PWD/ccache
+            ccache -M 1600GB
+            ccache -sv
+            ccache -z
+
       - name: Configure CMake Project
         uses: devcontainers/ci@v0.3
         with:
