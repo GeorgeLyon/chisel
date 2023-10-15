@@ -12,8 +12,7 @@ using namespace circel;
 using namespace mlir;
 
 JNIPassManager::JNIPassManager(JNIEnv *env, jobject passManager)
-    : JNIPassManager(
-          env, JNIContext::unwrapPassManager(env, passManager)) {}
+    : JNIPassManager(env, JNIContext::unwrapPassManager(env, passManager)) {}
 
 JNIEXPORT jobject JNICALL
 Java_MLIR_PassManager_create(JNIEnv *env, jclass passManagerClass,

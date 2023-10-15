@@ -14,6 +14,6 @@ public:
 };
 std::ostream &operator<<(std::ostream &os, DebugJavaClassName const &name);
 
-} // namespace mlir
+} // namespace circel
 
 #endif // CIRCEL_BINDINGS_JNI_JNI_DEBUG_HELPERS_H_

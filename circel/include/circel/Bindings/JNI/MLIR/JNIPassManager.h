@@ -30,6 +30,6 @@ private:
   ScopedPassManager passManager;
 };
 
-} // namespace mlir
+} // namespace circel
 
 #endif // CIRCEL_BINDINGS_JNI_MLIR_JNI_PASS_MANAGER_H_

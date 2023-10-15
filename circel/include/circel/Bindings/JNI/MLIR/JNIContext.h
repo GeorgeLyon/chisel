@@ -140,14 +140,14 @@ private:
 // -- Class Bindings
 
 #define MLIR_JNI_DECLARE_CLASS_BINDING(CppType)                                \
-  template <> struct ::circel::JNIContext::JavaClassBinding<CppType> { \
-    static const ::circel::JNIContext::JavaClass &getClass();          \
+  template <> struct ::circel::JNIContext::JavaClassBinding<CppType> {         \
+    static const ::circel::JNIContext::JavaClass &getClass();                  \
   };
 #define MLIR_JNI_DEFINE_CLASS_BINDING(CppType, JavaClassName)                  \
-  const ::circel::JNIContext::JavaClass                                \
-      & ::circel::JNIContext::JavaClassBinding<CppType>::getClass() {  \
+  const ::circel::JNIContext::JavaClass                                        \
+      & ::circel::JNIContext::JavaClassBinding<CppType>::getClass() {          \
     static auto &clazz =                                                       \
-        circel::JNIContext::createJavaClass("" JavaClassName "");      \
+        circel::JNIContext::createJavaClass("" JavaClassName "");              \
     return clazz;                                                              \
   }
 

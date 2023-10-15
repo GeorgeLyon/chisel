@@ -101,6 +101,6 @@ private:
   ScopedBuilder builder;
 };
 
-} // namespace mlir
+} // namespace circel
 
 #endif // CIRCEL_BINDINGS_JNI_MLIR_JNI_BUILDER_H_
