@@ -16,6 +16,7 @@ add_lit_testsuite(check-circel "Running the CIRCEL regression tests"
   DEPENDS 
     FileCheck count not
     circel-bindings-support-test
+    circel-bindings-jni-mlir-test
     circel-bindings-swift-test
   )
 set_target_properties(check-circel PROPERTIES FOLDER "Tests")

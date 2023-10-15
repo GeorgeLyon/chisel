@@ -10,6 +10,7 @@
         "circel-lsp-server",
         "firtool",
         "circel-bindings-swift-test",
+        "circel-bindings-jni-mlir-test",
         "circel-bindings-support-test"
       ],
       "group": {

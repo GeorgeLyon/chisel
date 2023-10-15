@@ -52,6 +52,11 @@
   // -- MLIR LSP Server
   "mlir.onSettingsChanged": "restart",
 
+  // -- Swift
+  "swift.path": "/swift/usr/bin/",
+  "lldb.library": "/swift/usr/lib/liblldb.so",
+  "lldb.launch.expressions": "native",
+
   // -- Metals 
   // Metals opens some ports in the remote container that we don't need to forward to the host. This setting needs to be set `settings.json`.
   "remote.autoForwardPorts": false,
