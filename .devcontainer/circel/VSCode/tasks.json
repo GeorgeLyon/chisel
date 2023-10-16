@@ -9,9 +9,10 @@
         "MLIRIR",
         "circel-lsp-server",
         "firtool",
-        "circel-bindings-swift-test",
+        "circel-bindings-support-test",
+        "circel-java-test-launcher",
         "circel-bindings-jni-mlir-test",
-        "circel-bindings-support-test"
+        "circel-bindings-swift-test"
       ],
       "group": {
         "kind": "build",

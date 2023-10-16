@@ -8,7 +8,7 @@ import MLIR.Locations.*;
 
 public class MLIRJNITests {
 	public static class Test {
-		public static void main(String[] args) {
+		public static void main() {
 			try {
 				MLIR.NativeLibrary.ensureIsLoaded();
 			} catch (Exception e) {
@@ -55,6 +55,8 @@ public class MLIRJNITests {
 					Type[] results = { i64, i32 };
 					FunctionType functionType = FunctionType.get(context, arguments, results);
 					functionType.dump(context);
+
+					System.out.println("DONE!");
 				}
 			}
 		}

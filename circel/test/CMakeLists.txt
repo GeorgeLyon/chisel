@@ -1,5 +1,8 @@
 add_subdirectory(Bindings)
 
+# Must be added after `Bindings` as it hardcodes the classpath
+add_subdirectory(circel-java-test-launcher)
+
 # Get the classpath as an argument
 get_property(MLIR_JAVA_CLASSPATH GLOBAL PROPERTY MLIR_JAVA_CLASSPATH)
 list(JOIN MLIR_JAVA_CLASSPATH ":" MLIR_JAVA_CLASSPATH_ARGUMENT)
@@ -16,6 +19,7 @@ add_lit_testsuite(check-circel "Running the CIRCEL regression tests"
   DEPENDS 
     FileCheck count not
     circel-bindings-support-test
+    circel-java-test-launcher
     circel-bindings-jni-mlir-test
     circel-bindings-swift-test
   )
