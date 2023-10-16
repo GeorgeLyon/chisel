@@ -41,11 +41,14 @@ jobs:
         with:
           push: never
           runCmd: |
-            LLVM_HASH=$(find /llvm -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum)
+            LLVM_HASH=$(find /llvm -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
+            echo $LLVM_HASH
             echo "llvm-hash=$LLVM_HASH" >> $GITHUB_OUTPUT
-            CIRCT_HASH=$(find /circt -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum)
+            CIRCT_HASH=$(find /circt -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
+            echo $CIRCT_HASH
             echo "circt-hash=$CIRCT_HASH" >> $GITHUB_OUTPUT
             . /etc/lsb-release
+            ech $DISTRIB_CODENAME
             echo "ubuntu-codename=$DISTRIB_CODENAME" >> $GITHUB_OUTPUT
 
       - name: Restore ccache database
@@ -76,6 +79,7 @@ jobs:
         with:
           push: never
           runCmd: |
+            exit 1
             export CCACHE_DIR=$PWD/ccache
             git config --global --add safe.directory $PWD
             ./circel/support/cmake-helper configure ${{ join(matrix.additional-cmake-flags, ' ') }}
