@@ -29,39 +29,32 @@ jobs:
         run: .devcontainer/devcontainer-helper --make-singular ${{ matrix.devcontainer-name }}
 
       - name: Initialize devcontainer
-        uses: devcontainers/ci@v0.3.1900000329
+        uses: devcontainers/ci@v0.3
         with:
           push: never
           runCmd: |
             echo "Done."
 
+      # Even though devcontainers/ci should support $GITHUB_OUTPUT, it doesn't seem to work, so instead we write everything to a file that we later write to $GITHUB_OUTPUT in a non-devcontainer step.
       - name: Get cache key parts
-        uses: devcontainers/ci@v0.3.1900000329
+        uses: devcontainers/ci@v0.3
         with:
           push: never
           runCmd: |
-            env
+            rm -f .temporary-github-output
             LLVM_HASH=$(find /llvm -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
-            echo $LLVM_HASH
-            echo $LLVM_HASH > .llvm-hash
-            echo "llvm-hash=$LLVM_HASH" >> $GITHUB_OUTPUT
-            CIRCT_HASH=$(find /circt -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
-            echo $CIRCT_HASH
-            echo $CIRCT_HASH > .circt-hash
-            echo "circt-hash=$CIRCT_HASH" >> $GITHUB_OUTPUT
+            echo "llvm-hash=$LLVM_HASH" >> .temporary-github-output
+             xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
+            echo "circt-hash=$CIRCT_HASH" >> .temporary-github-output
             . /etc/lsb-release
-            echo $DISTRIB > .ubuntu-codename
-            echo $DISTRIB_CODENAME
-            echo "ubuntu-codename=$DISTRIB_CODENAME" >> $GITHUB_OUTPUT
+            echo "ubuntu-codename=$DISTRIB_CODENAME" >> .temporary-github-output
 
       - name: Export cache key parts
         id: get-cache-key-parts
         run: |
-          cat .llvm-hash .circt-hash .ubuntu-codename
-          echo "llvm-hash=$(cat .llvm-hash)" >> $GITHUB_OUTPUT
-          echo "circt-hash=$(cat .circt-hash)" >> $GITHUB_OUTPUT
-          echo "ubuntu-codename=$(cat .ubuntu-codename)" >> $GITHUB_OUTPUT
-          rm .llvm-hash .circt-hash .ubuntu-codename
+          cat .temporary-github-output
+          cat .temporary-github-output >> $GITHUB_OUTPUT
+          rm .temporary-github-output
 
       - name: Get output from previous step
         run: |
@@ -81,7 +74,7 @@ jobs:
             circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}
       
       - name: Initialize ccache
-        uses: devcontainers/ci@v0.3.1900000329
+        uses: devcontainers/ci@v0.3
         with:
           # We configure ccache to not evict anything during compilation, and we perform a cleanup after compilation completes
           push: never
@@ -93,7 +86,7 @@ jobs:
             ccache -z
 
       - name: Configure CMake Project
-        uses: devcontainers/ci@v0.3.1900000329
+        uses: devcontainers/ci@v0.3
         with:
           push: never
           runCmd: |
@@ -105,7 +98,7 @@ jobs:
       # We run the build, once to check the targets and once to log the errors without any progress logs cluttering the output (since it is a trivial incremental build). Please take care to make sure the following two steps stay in sync.
       - name: Check targets
         id: check-targets
-        uses: devcontainers/ci@v0.3.1900000329
+        uses: devcontainers/ci@v0.3
         with:
           push: never
           runCmd: |
@@ -116,7 +109,7 @@ jobs:
 
       - name: Log errors in a separate task
         if: failure() && steps.check-targets.outcome == 'failure'
-        uses: devcontainers/ci@v0.3.1900000329
+        uses: devcontainers/ci@v0.3
         with:
           push: never
           runCmd: |
@@ -126,7 +119,7 @@ jobs:
             ./circel/support/cmake-helper test
 
       - name: Clean up ccache
-        uses: devcontainers/ci@v0.3.1900000329
+        uses: devcontainers/ci@v0.3
         with:
           push: never
           runCmd: |
@@ -144,7 +137,7 @@ jobs:
           key: circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('./**') }}
       # If evicting everything that wasn't used this workflow does not reduce the cache past its maximum, it may benefit performance to increase the cache size.
       - name: Log ccache estimated usage
-        uses: devcontainers/ci@v0.3.1900000329
+        uses: devcontainers/ci@v0.3
         with:
           push: never
           runCmd: |
@@ -153,7 +146,7 @@ jobs:
             ccache -sv
             rm .workflow-start-seconds
       - name: Check that repository is clean
-        uses: devcontainers/ci@v0.3.1900000329
+        uses: devcontainers/ci@v0.3
         with:
           push: never
           runCmd: |
