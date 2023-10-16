@@ -106,10 +106,11 @@ int main(int argc, char **argv) {
     assert(methodClass && "Failed to find method class");
 
     // Call `main` method
-    jmethodID methodMethodID =
-        env->GetStaticMethodID(methodClass, "main", "()V");
-    assert(methodMethodID && "Failed to find main method");
-    env->CallStaticVoidMethod(methodClass, methodMethodID);
+    jmethodID mainMethodID =
+        env->GetStaticMethodID(methodClass, "main", "([Ljava/lang/String;)V");
+    assert(mainMethodID && "Failed to find main method");
+    auto mainMethodArgs = env->NewObjectArray(0, stringClass, nullptr);
+    env->CallStaticVoidMethod(methodClass, mainMethodID, mainMethodArgs);
 
     env->ExceptionDescribe();
   }

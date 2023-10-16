@@ -16,9 +16,15 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Debug Java Launcher",
+      "name": "Debug Bindings JNI Test",
       "program": "${workspaceFolder}/build/circel/bin/circel-java-test-launcher",
-      "args": [ ],
+      "args": [
+        "--class",
+        "MLIRJNITests$Test"
+      ],
+      "env": {
+        "MLIRJNI_LIB_PATH": "${workspaceFolder}/build/circel/lib/libCIRCELBindingsJNIMLIR.jni"
+      },
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Build CIRCEL"
     }

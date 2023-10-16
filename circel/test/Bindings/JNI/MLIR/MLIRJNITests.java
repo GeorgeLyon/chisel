@@ -1,4 +1,4 @@
-// RUN: MLIRJNI_LIB_PATH=%MLIR_JNI_LIB_DIR%/libCIRCELBindingsJNIMLIR.jni java -cp %MLIR_JAVA_CLASSPATH_ARGUMENT% MLIRJNITests\$Test 2>&1 | FileCheck %s
+// RUN: MLIRJNI_LIB_PATH=%MLIR_JNI_LIB_DIR%/libCIRCELBindingsJNIMLIR.jni circel-java-test-launcher --class MLIRJNITests\$Test 2>&1 | FileCheck %s
 
 import MLIR.*;
 import MLIR.Attributes.*;
@@ -8,15 +8,12 @@ import MLIR.Locations.*;
 
 public class MLIRJNITests {
 	public static class Test {
-		public static void main() {
-			System.out.println("Hello");
-
+		public static void main(String[] args) {
 			try {
 				MLIR.NativeLibrary.ensureIsLoaded();
 			} catch (Exception e) {
 				throw new RuntimeException(e);
 			}
-			System.out.println("World");
 			try (Context context = Context.create()) {
 				// CHECK: Hello from MLIR!
 				StringAttribute stringAttribute = StringAttribute.get(context, "Hello from MLIR!");
