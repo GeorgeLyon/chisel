@@ -36,7 +36,6 @@ jobs:
             echo "Done."
 
       - name: Get cache key parts
-        id: get-cache-key-parts
         uses: devcontainers/ci@v0.3.1900000329
         with:
           push: never
@@ -44,13 +43,25 @@ jobs:
             env
             LLVM_HASH=$(find /llvm -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
             echo $LLVM_HASH
+            echo $LLVM_HASH > .llvm-hash
             echo "llvm-hash=$LLVM_HASH" >> $GITHUB_OUTPUT
             CIRCT_HASH=$(find /circt -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
             echo $CIRCT_HASH
+            echo $CIRCT_HASH > .circt-hash
             echo "circt-hash=$CIRCT_HASH" >> $GITHUB_OUTPUT
             . /etc/lsb-release
+            echo $DISTRIB > .ubuntu-codename
             echo $DISTRIB_CODENAME
             echo "ubuntu-codename=$DISTRIB_CODENAME" >> $GITHUB_OUTPUT
+
+      - name: Export cache key parts
+        id: get-cache-key-parts
+        run: |
+          cat .llvm-hash .circt-hash .ubuntu-codename
+          echo "llvm-hash=$(cat .llvm-hash)" >> $GITHUB_OUTPUT
+          echo "circt-hash=$(cat .circt-hash)" >> $GITHUB_OUTPUT
+          echo "ubuntu-codename=$(cat .ubuntu-codename)" >> $GITHUB_OUTPUT
+          rm .llvm-hash .circt-hash .ubuntu-codename
 
       - name: Get output from previous step
         run: |
