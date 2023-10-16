@@ -55,8 +55,6 @@ public class MLIRJNITests {
 					Type[] results = { i64, i32 };
 					FunctionType functionType = FunctionType.get(context, arguments, results);
 					functionType.dump(context);
-
-					System.out.println("DONE!");
 				}
 			}
 		}
