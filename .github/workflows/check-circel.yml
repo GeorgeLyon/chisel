@@ -29,7 +29,7 @@ jobs:
         run: .devcontainer/devcontainer-helper --make-singular ${{ matrix.devcontainer-name }}
 
       - name: Initialize devcontainer
-        uses: devcontainers/ci@v0.3
+        uses: devcontainers/ci@main
         with:
           push: never
           runCmd: |
@@ -37,7 +37,7 @@ jobs:
 
       - name: Get cache key parts
         id: get-cache-key-parts
-        uses: devcontainers/ci@v0.3
+        uses: devcontainers/ci@main
         with:
           push: never
           runCmd: |
@@ -60,7 +60,7 @@ jobs:
             circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}
       
       - name: Initialize ccache
-        uses: devcontainers/ci@v0.3
+        uses: devcontainers/ci@main
         with:
           # We configure ccache to not evict anything during compilation, and we perform a cleanup after compilation completes
           push: never
@@ -72,7 +72,7 @@ jobs:
             ccache -z
 
       - name: Configure CMake Project
-        uses: devcontainers/ci@v0.3
+        uses: devcontainers/ci@main
         with:
           push: never
           runCmd: |
@@ -83,7 +83,7 @@ jobs:
       # We run the build, once to check the targets and once to log the errors without any progress logs cluttering the output (since it is a trivial incremental build). Please take care to make sure the following two steps stay in sync.
       - name: Check targets
         id: check-targets
-        uses: devcontainers/ci@v0.3
+        uses: devcontainers/ci@main
         with:
           push: never
           runCmd: |
@@ -94,7 +94,7 @@ jobs:
 
       - name: Log errors in a separate task
         if: failure() && steps.check-targets.outcome == 'failure'
-        uses: devcontainers/ci@v0.3
+        uses: devcontainers/ci@main
         with:
           push: never
           runCmd: |
@@ -104,7 +104,7 @@ jobs:
             ./circel/support/cmake-helper test
 
       - name: Clean up ccache
-        uses: devcontainers/ci@v0.3
+        uses: devcontainers/ci@main
         with:
           push: never
           runCmd: |
@@ -122,7 +122,7 @@ jobs:
           key: circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('./**') }}
       # If evicting everything that wasn't used this workflow does not reduce the cache past its maximum, it may benefit performance to increase the cache size.
       - name: Log ccache estimated usage
-        uses: devcontainers/ci@v0.3
+        uses: devcontainers/ci@main
         with:
           push: never
           runCmd: |
@@ -131,7 +131,7 @@ jobs:
             ccache -sv
             rm .workflow-start-seconds
       - name: Check that repository is clean
-        uses: devcontainers/ci@v0.3
+        uses: devcontainers/ci@main
         with:
           push: never
           runCmd: |
