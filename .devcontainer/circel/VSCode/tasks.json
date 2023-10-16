@@ -1,0 +1,36 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "cmake",
+      "label": "Build CIRCEL",
+      "command": "build",
+      "targets": [
+        "MLIRIR",
+        "circel-lsp-server",
+        "firtool",
+        "circel-bindings-swift-test",
+        "circel-bindings-jni-mlir-test",
+        "circel-bindings-support-test"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [ ]
+    },
+    {
+      "type": "cmake",
+      "label": "Test CIRCEL",
+      "command": "build",
+      "targets": [
+        "check-circel"
+      ],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": [ ]
+    }
+  ]
+}
