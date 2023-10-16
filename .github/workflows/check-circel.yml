@@ -44,23 +44,16 @@ jobs:
             rm -f .temporary-github-output
             LLVM_HASH=$(find /llvm -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
             echo "llvm-hash=$LLVM_HASH" >> .temporary-github-output
-             xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
+            CIRCT_HASH=$(find /circt -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
             echo "circt-hash=$CIRCT_HASH" >> .temporary-github-output
             . /etc/lsb-release
             echo "ubuntu-codename=$DISTRIB_CODENAME" >> .temporary-github-output
-
       - name: Export cache key parts
         id: get-cache-key-parts
         run: |
           cat .temporary-github-output
           cat .temporary-github-output >> $GITHUB_OUTPUT
           rm .temporary-github-output
-
-      - name: Get output from previous step
-        run: |
-          echo ${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}
-          echo ${{ steps.get-cache-key-parts.outputs.llvm-hash }}
-          echo ${{ steps.get-cache-key-parts.outputs.circt-hash }}
         
       - name: Restore ccache database
         uses: actions/cache/restore@v3
@@ -90,7 +83,6 @@ jobs:
         with:
           push: never
           runCmd: |
-            exit 1
             export CCACHE_DIR=$PWD/ccache
             git config --global --add safe.directory $PWD
             ./circel/support/cmake-helper configure ${{ join(matrix.additional-cmake-flags, ' ') }}
