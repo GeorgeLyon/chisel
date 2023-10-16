@@ -26,7 +26,6 @@
         "llvm-vs-code-extensions.vscode-mlir",
         "ms-vscode.cmake-tools",
         "scalameta.metals",
-        "sswg.swift-lang",
         "timonwong.shellcheck",
         "vadimcn.vscode-lldb"
       ],

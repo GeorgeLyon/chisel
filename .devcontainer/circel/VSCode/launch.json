@@ -1,0 +1,32 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Bindings Support Test",
+      "program": "${workspaceFolder}/build/circel/bin/circel-bindings-support-test",
+      "args": [ ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build CIRCEL"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Bindings JNI Test",
+      "program": "${workspaceFolder}/build/circel/bin/circel-java-test-launcher",
+      "args": [
+        "--class",
+        "MLIRJNITests$Test"
+      ],
+      "env": {
+        "MLIRJNI_LIB_PATH": "${workspaceFolder}/build/circel/lib/libCIRCELBindingsJNIMLIR.jni"
+      },
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build CIRCEL"
+    }
+  ],
+}
