@@ -59,7 +59,7 @@ jobs:
         uses: actions/cache/restore@v3
         with: 
           path: ccache
-          key: circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('circel-core/**') }}
+          key: circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('circel/**') }}
           restore-keys: |
             circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-
             circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-
