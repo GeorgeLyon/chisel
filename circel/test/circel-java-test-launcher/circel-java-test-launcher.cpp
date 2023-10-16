@@ -9,6 +9,10 @@ using namespace llvm;
 
 cl::opt<std::string> className("class", cl::desc("Class to run"), cl::Required);
 
+JNIEXPORT jint JNICALL JNI_OnLoad_MLIRJNI(JavaVM *vm, void *reserved) {
+  return JNI_VERSION_10;
+}
+
 int main(int argc, char **argv) {
   cl::ParseCommandLineOptions(argc, argv);
 
@@ -106,6 +110,8 @@ int main(int argc, char **argv) {
         env->GetStaticMethodID(methodClass, "main", "()V");
     assert(methodMethodID && "Failed to find main method");
     env->CallStaticVoidMethod(methodClass, methodMethodID);
+
+    env->ExceptionDescribe();
   }
 
   return 0;

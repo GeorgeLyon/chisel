@@ -9,11 +9,14 @@ import MLIR.Locations.*;
 public class MLIRJNITests {
 	public static class Test {
 		public static void main() {
+			System.out.println("Hello");
+
 			try {
 				MLIR.NativeLibrary.ensureIsLoaded();
 			} catch (Exception e) {
 				throw new RuntimeException(e);
 			}
+			System.out.println("World");
 			try (Context context = Context.create()) {
 				// CHECK: Hello from MLIR!
 				StringAttribute stringAttribute = StringAttribute.get(context, "Hello from MLIR!");
