@@ -68,6 +68,6 @@
     "**/.ninja_log": true,
     "**/*.ninja": true,
     "build/**/*.json": true,
-    "build/**/CMakeFiles": true,
+    "build/**/CMakeFiles": true
   }
 }
