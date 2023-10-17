@@ -35,24 +35,31 @@ jobs:
           runCmd: |
             echo "Done."
 
+      # Even though devcontainers/ci should support $GITHUB_OUTPUT, it doesn't seem to work, so instead we write everything to a file that we later write to $GITHUB_OUTPUT in a non-devcontainer step.
       - name: Get cache key parts
-        id: get-cache-key-parts
         uses: devcontainers/ci@v0.3
         with:
           push: never
           runCmd: |
-            LLVM_HASH=$(find /llvm -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum)
-            echo "llvm-hash=$LLVM_HASH" >> $GITHUB_OUTPUT
-            CIRCT_HASH=$(find /circt -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum)
-            echo "circt-hash=$CIRCT_HASH" >> $GITHUB_OUTPUT
+            rm -f .temporary-github-output
+            LLVM_HASH=$(find /llvm -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
+            echo "llvm-hash=$LLVM_HASH" >> .temporary-github-output
+            CIRCT_HASH=$(find /circt -type f -print0 | sort -z | xargs -0 sha1sum | sha1sum | cut -d' ' -f1)
+            echo "circt-hash=$CIRCT_HASH" >> .temporary-github-output
             . /etc/lsb-release
-            echo "ubuntu-codename=$DISTRIB_CODENAME" >> $GITHUB_OUTPUT
-
+            echo "ubuntu-codename=$DISTRIB_CODENAME" >> .temporary-github-output
+      - name: Export cache key parts
+        id: get-cache-key-parts
+        run: |
+          cat .temporary-github-output
+          cat .temporary-github-output >> $GITHUB_OUTPUT
+          rm .temporary-github-output
+        
       - name: Restore ccache database
         uses: actions/cache/restore@v3
         with: 
           path: ccache
-          key: circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('circel-core/**') }}
+          key: circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('circel/**') }}
           restore-keys: |
             circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-
             circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-
