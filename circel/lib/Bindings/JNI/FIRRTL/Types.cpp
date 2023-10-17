@@ -1,1 +1,1 @@
-#include "CIRCEL/Bindings/JNI/MLIR/JNIContext.h"
+#include "circel/Bindings/JNI/MLIR/JNIContext.h"
