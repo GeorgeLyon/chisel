@@ -6,7 +6,7 @@ include(UseJava)
 add_llvm_tool(circel-java-test-launcher
   circel-java-test-launcher.cpp)
 target_link_libraries(circel-java-test-launcher PRIVATE 
-  CIRCELBindingsJNIMLIR
+  MLIRJNI
   LLVMSupport
   JNI::JVM
   JNI::JNI)

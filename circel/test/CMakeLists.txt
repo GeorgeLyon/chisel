@@ -17,6 +17,7 @@ add_lit_testsuite(check-circel "Running the CIRCEL regression tests"
     circel-bindings-support-test
     circel-java-test-launcher
     circel-bindings-jni-mlir-test
+    circel-bindings-jni-firrtl-test
     circel-bindings-swift-test
   )
 set_target_properties(check-circel PROPERTIES FOLDER "Tests")

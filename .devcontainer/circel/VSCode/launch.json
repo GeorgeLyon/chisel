@@ -23,7 +23,7 @@
         "MLIRJNITests$Test"
       ],
       "env": {
-        "MLIRJNI_LIB_PATH": "${workspaceFolder}/build/circel/lib/libCIRCELBindingsJNIMLIR.jni"
+        "MLIRJNI_LIB_PATH": "${workspaceFolder}/build/circel/lib/libMLIRJNI.jni"
       },
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "Build CIRCEL"

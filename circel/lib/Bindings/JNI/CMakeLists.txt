@@ -57,3 +57,4 @@ function(add_mlir_jni_library name)
 endfunction()
 
 add_subdirectory(MLIR)
+add_subdirectory(FIRRTL)

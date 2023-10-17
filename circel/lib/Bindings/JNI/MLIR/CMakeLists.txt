@@ -1,4 +1,4 @@
-add_mlir_jni_library(CIRCELBindingsJNIMLIR
+add_mlir_jni_library(MLIRJNI
   JNI_SOURCE_PAIRS
     Attributes
     Block

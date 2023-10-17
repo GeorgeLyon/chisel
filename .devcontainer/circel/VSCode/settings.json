@@ -63,5 +63,11 @@
   "files.exclude": {
     "**/target": true,
     ".bloop/*": true
+  },
+  "search.exclude": {
+    "**/.ninja_log": true,
+    "**/*.ninja": true,
+    "build/**/*.json": true,
+    "build/**/CMakeFiles": true,
   }
 }
