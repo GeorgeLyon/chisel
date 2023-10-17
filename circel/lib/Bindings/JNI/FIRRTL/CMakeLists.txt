@@ -1,6 +1,7 @@
 add_mlir_jni_library(FIRRTLJNI
   JNI_SOURCE_PAIRS
     Dialect
+    Operations
     Types
 
   ADDITIONAL_JAVA_SOURCES

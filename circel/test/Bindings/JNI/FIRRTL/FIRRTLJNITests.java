@@ -5,7 +5,7 @@ import MLIR.Attributes.*;
 import MLIR.Operations.*;
 import MLIR.Types.*;
 import MLIR.Values.*;
-import MLIR.Locations.*;
+import MLIR.Locations.Location;
 import FIRRTL.*;
 import FIRRTL.Types.*;
 
@@ -20,8 +20,26 @@ public class FIRRTLJNITests {
 			try (Context context = Context.create()) {
 				FIRRTL.Dialect.load(context);
 
-				// CHECK: Hello, FIRRTL!
-				System.err.println("Hello, FIRRTL!");
+				// CHECK: loc(unknown)
+				Location loc = Locations.Unknown.get(context);
+				loc.dump(context);
+
+				try (Builder builder = Builder.create(context)) {
+					MLIR.Operations.Module moduleOp = MLIR.Operations.Module.build(builder, loc);
+					builder.setInsertionPointToStart(moduleOp.getBody(builder));
+
+					/*-
+					// CHECK:      module {
+					// CHECK-NEXT: }
+					// CHECK-NEXT: Run succeeded.
+					*/
+					PassManager passManager = PassManager.create(builder);
+					passManager.enableVerifier();
+					passManager.addPrintIRPass();
+					if (passManager.run(moduleOp)) {
+						System.out.println("Run succeeded.");
+					}
+				}
 			}
 		}
 	}
