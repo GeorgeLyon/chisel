@@ -1,5 +1,6 @@
 add_mlir_jni_library(FIRRTLJNI
   JNI_SOURCE_PAIRS
+    Attributes
     Dialect
     Operations
     Types

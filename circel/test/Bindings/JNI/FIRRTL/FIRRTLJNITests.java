@@ -7,6 +7,8 @@ import MLIR.Types.*;
 import MLIR.Values.*;
 import MLIR.Locations.Location;
 import FIRRTL.*;
+import FIRRTL.Attributes.*;
+import FIRRTL.Operations.*;
 import FIRRTL.Types.*;
 
 public class FIRRTLJNITests {
@@ -24,20 +26,38 @@ public class FIRRTLJNITests {
 				Location loc = Locations.Unknown.get(context);
 				loc.dump(context);
 
+				// CHECK-NEXT: #firrtl<convention scalarized>
+				Convention scalarized = Convention.getScalarized(context);
+				scalarized.dump(context);
+
+				// CHECK-NEXT: !firrtl.clock
+				Clock clockType = Clock.get(context);
+				clockType.dump(context);
+
 				try (Builder builder = Builder.create(context)) {
-					MLIR.Operations.Module moduleOp = MLIR.Operations.Module.build(builder, loc);
-					builder.setInsertionPointToStart(moduleOp.getBody(builder));
+					MLIR.Operations.Module mlirModule = MLIR.Operations.Module.build(builder, loc);
+					builder.setInsertionPointToStart(mlirModule.getBody(builder));
+
+					Circuit circuitOp = Circuit.build(builder, loc, "test");
+					builder.setInsertionPointToStart(circuitOp.getBody(builder));
+
+					FIRRTL.Operations.Module module = FIRRTL.Operations.Module.build(builder, loc, "test", scalarized);
 
 					/*-
-					// CHECK:      module {
+					// CHECK-NEXT: // -----// IR Dump //----- //
+					// CHECK-NEXT: module {
+					// CHECK-NEXT:	 firrtl.circuit "test" {
+					// CHECK-NEXT:     firrtl.module @test() attributes {convention = #firrtl<convention scalarized>} {
+					// CHECK-NEXT:     }
+					// CHECK-NEXT:   }
 					// CHECK-NEXT: }
-					// CHECK-NEXT: Run succeeded.
+					// CHECK-NEXT: IR is valid!
 					*/
 					PassManager passManager = PassManager.create(builder);
 					passManager.enableVerifier();
 					passManager.addPrintIRPass();
-					if (passManager.run(moduleOp)) {
-						System.out.println("Run succeeded.");
+					if (passManager.run(mlirModule)) {
+						System.out.println("IR is valid!");
 					}
 				}
 			}
