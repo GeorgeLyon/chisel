@@ -26,20 +26,18 @@ public class Operations extends MLIR.Operations {
 			In, Out
 		}
 
-		public void addPort(Builder builder, String name, Type type, PortDirection direction) {
+		public BlockArgument addPort(Builder builder, String name, Type type, PortDirection direction) {
 			switch (direction) {
 			case In:
-				addPort(builder, name, type, true);
-				break;
+				return addPort(builder, name, type, true);
 			case Out:
-				addPort(builder, name, type, false);
-				break;
+				return addPort(builder, name, type, false);
 			default:
 				throw new IllegalArgumentException("Invalid direction: " + direction);
 			}
 		}
 
-		private native void addPort(Builder builder, String name, Type type, boolean directionIsIn);
+		private native BlockArgument addPort(Builder builder, String name, Type type, boolean directionIsIn);
 
 		protected Module(long reference) {
 			super(reference);

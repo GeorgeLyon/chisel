@@ -49,7 +49,7 @@ JNIEXPORT jobject JNICALL Java_FIRRTL_Operations_00024Module_build(
   return builder.wrap(op);
 }
 
-JNIEXPORT void JNICALL Java_FIRRTL_Operations_00024Module_addPort(
+JNIEXPORT jobject JNICALL Java_FIRRTL_Operations_00024Module_addPort(
     JNIEnv *env, jobject jOp, jobject jBuilder, jstring jName, jobject jType,
     jboolean directionIsIn) {
   auto builder = JNIBuilder(env, jBuilder);
@@ -62,4 +62,6 @@ JNIEXPORT void JNICALL Java_FIRRTL_Operations_00024Module_addPort(
   auto portsToInsert = llvm::SmallVector<std::pair<unsigned int, PortInfo>, 1>{
       std::make_pair(portIndex, port)};
   op.insertPorts(portsToInsert);
+  auto arg = op.getArgument(portIndex);
+  return builder.wrap(arg);
 }

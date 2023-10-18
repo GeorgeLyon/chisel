@@ -34,22 +34,61 @@ public class FIRRTLJNITests {
 				Clock clockType = Clock.get(context);
 				clockType.dump(context);
 
+				// CHECK-NEXT: !firrtl.uint<1>
+				UInt bitType = UInt.get(context, 1);
+				bitType.dump(context);
+
+				// CHECK-NEXT: !firrtl.uint<32>
+				UInt uintValueType = UInt.get(context, 32);
+				uintValueType.dump(context);
+
 				try (Builder builder = Builder.create(context)) {
-					MLIR.Operations.Module mlirModule = MLIR.Operations.Module.build(builder, loc);
-					builder.setInsertionPointToStart(mlirModule.getBody(builder));
-
-					Circuit circuitOp = Circuit.build(builder, loc, "test");
-					builder.setInsertionPointToStart(circuitOp.getBody(builder));
-
-					FIRRTL.Operations.Module module = FIRRTL.Operations.Module.build(builder, loc, "test", scalarized);
-
-					module.addPort(builder, "clock", clockType, FIRRTL.Operations.Module.PortDirection.In);
 
 					/*-
 					// CHECK-NEXT: // -----// IR Dump //----- //
 					// CHECK-NEXT: module {
+					*/
+					MLIR.Operations.Module mlirModule = MLIR.Operations.Module.build(builder, loc);
+					builder.setInsertionPointToStart(mlirModule.getBody(builder));
+
+					/*-
 					// CHECK-NEXT:	 firrtl.circuit "test" {
-					// CHECK-NEXT:     firrtl.module @test(in %clock: !firrtl.clock) attributes {convention = #firrtl<convention scalarized>} {
+					*/
+					Circuit circuitOp = Circuit.build(builder, loc, "test");
+					builder.setInsertionPointToStart(circuitOp.getBody(builder));
+
+					/*-
+					// CHECK-NEXT:     firrtl.module @test(
+					*/
+					FIRRTL.Operations.Module module = FIRRTL.Operations.Module.build(builder, loc, "test", scalarized);
+
+					// CHECK-SAME: in %clock: !firrtl.clock,
+					BlockArgument clockPort = module.addPort(builder, "clock", clockType,
+							FIRRTL.Operations.Module.PortDirection.In);
+					// CHECK-SAME: in %reset: !firrtl.uint<1>,
+					BlockArgument resetPort = module.addPort(builder, "reset", bitType,
+							FIRRTL.Operations.Module.PortDirection.In);
+					// CHECK-SAME: in %a: !firrtl.uint<32>,
+					BlockArgument aPort = module.addPort(builder, "a", uintValueType,
+							FIRRTL.Operations.Module.PortDirection.In);
+					// CHECK-SAME: in %b: !firrtl.uint<32>,
+					BlockArgument bPort = module.addPort(builder, "b", uintValueType,
+							FIRRTL.Operations.Module.PortDirection.In);
+					// CHECK-SAME: in %loadValues: !firrtl.uint<1>,
+					BlockArgument loadValuesPort = module.addPort(builder, "loadValues", bitType,
+							FIRRTL.Operations.Module.PortDirection.In);
+					// CHECK-SAME: out %result: !firrtl.uint<32>,
+					BlockArgument resultPort = module.addPort(builder, "result", uintValueType,
+							FIRRTL.Operations.Module.PortDirection.Out);
+					// CHECK-SAME: out %resultIsValid: !firrtl.uint<1>
+					BlockArgument resultIsValidPort = module.addPort(builder, "resultIsValid", bitType,
+							FIRRTL.Operations.Module.PortDirection.Out);
+
+					/*-
+					// CHECK-SAME: ) attributes {convention = #firrtl<convention scalarized>} {
+					*/
+
+					/*-
 					// CHECK-NEXT:     }
 					// CHECK-NEXT:   }
 					// CHECK-NEXT: }

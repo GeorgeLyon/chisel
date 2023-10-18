@@ -15,4 +15,10 @@ public class Values {
 			super(pointer);
 		}
 	}
+
+	public static class BlockArgument extends Value {
+		protected BlockArgument(long pointer) {
+			super(pointer);
+		}
+	}
 }

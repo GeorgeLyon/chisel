@@ -20,3 +20,7 @@ JNIEXPORT void JNICALL Java_MLIR_Value_dump(JNIEnv *env, jobject jvalue,
 // -- OpResult
 
 MLIR_JNI_DEFINE_CLASS_BINDING(OpResult, "MLIR/Values$OpResult")
+
+// -- BlockArgument
+
+MLIR_JNI_DEFINE_CLASS_BINDING(BlockArgument, "MLIR/Values$BlockArgument")

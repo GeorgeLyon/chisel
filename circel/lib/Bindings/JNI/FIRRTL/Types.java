@@ -10,4 +10,12 @@ public class Types extends MLIR.Types {
 			super(reference);
 		}
 	}
+
+	public static class UInt extends Type {
+		public static native UInt get(Context context, long width);
+
+		protected UInt(long reference) {
+			super(reference);
+		}
+	}
 }
