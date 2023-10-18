@@ -54,8 +54,9 @@ case "$1" in
     shift 1 # Remove "configure" from the arguments
 
     (
+      CONFIGURE_ARGS=$("${BASH_SOURCE[0]}" print-configure-args)
       set -x
-      "${BASH_SOURCE[0]}" print-configure-args | xargs cmake \
+      echo "$CONFIGURE_ARGS" | xargs cmake \
         "-S$LLVM_DIR" \
         "-B$CMAKE_HELPER_BUILD_DIR"
     )

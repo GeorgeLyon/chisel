@@ -69,5 +69,5 @@
   "files.exclude": {
     "**/target": true,
     ".bloop/*": true
-  },
+  }
 }
