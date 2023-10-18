@@ -93,10 +93,9 @@ public class FIRRTLJNITests {
 					// CHECK-NEXT: %x = firrtl.reg %clock : !firrtl.clock, !firrtl.uint<32>
 					// CHECK-NEXT: %y = firrtl.reg %clock : !firrtl.clock, !firrtl.uint<32>
 					*/
-					Register x = Register.build(builder, loc, uintValueType, clockPort, "x",
-							NameKind.getDroppable(context), false);
-					Register y = Register.build(builder, loc, uintValueType, clockPort, "y",
-							NameKind.getDroppable(context), false);
+					NameKind droppable = NameKind.getDroppable(context);
+					Register x = Register.build(builder, loc, uintValueType, clockPort, "x", droppable, false);
+					Register y = Register.build(builder, loc, uintValueType, clockPort, "y", droppable, false);
 
 					/*-
 					// CHECK-NEXT:     }
