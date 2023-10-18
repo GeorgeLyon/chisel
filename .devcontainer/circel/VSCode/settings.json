@@ -35,6 +35,12 @@
     "-DLLVM_EXTERNAL_CIRCEL_SOURCE_DIR=${workspaceFolder}/circel",
     "-DCIRCT_LLHD_SIM_ENABLED=OFF"
   ],
+  "search.exclude": {
+    "**/.ninja_log": true,
+    "**/*.ninja": true,
+    "build/**/*.json": true,
+    "build/**/CMakeFiles": true
+  },
 
   // -- Clangd Settings
   "clangd.path": "clangd-17",
@@ -56,7 +62,7 @@
   // Metals opens some ports in the remote container that we don't need to forward to the host. This setting needs to be set `settings.json`.
   "remote.autoForwardPorts": false,
 
-  // -- Other
+  // -- Java
   "files.watcherExclude": {
     "**/target": true
   },
@@ -64,10 +70,4 @@
     "**/target": true,
     ".bloop/*": true
   },
-  "search.exclude": {
-    "**/.ninja_log": true,
-    "**/*.ninja": true,
-    "build/**/*.json": true,
-    "build/**/CMakeFiles": true
-  }
 }
