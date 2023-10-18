@@ -4,6 +4,7 @@
 
 #include "FIRRTL_Operations_Circuit.h"
 #include "FIRRTL_Operations_Module.h"
+#include "FIRRTL_Operations_Register.h"
 
 using namespace circel;
 using namespace circt::firrtl;
@@ -64,4 +65,40 @@ JNIEXPORT jobject JNICALL Java_FIRRTL_Operations_00024Module_addPort(
   op.insertPorts(portsToInsert);
   auto arg = op.getArgument(portIndex);
   return builder.wrap(arg);
+}
+
+JNIEXPORT jobject JNICALL Java_FIRRTL_Operations_00024Module_getBody(
+    JNIEnv *env, jobject jOp, jobject jBuilder) {
+  auto builder = JNIBuilder(env, jBuilder);
+  auto op = builder.unwrap<FModuleOp>(jOp);
+  auto region = &op.getRegion();
+  auto block = &region->front();
+  return builder.wrap(block);
+}
+
+// -- Register
+
+MLIR_JNI_DECLARE_CLASS_BINDING(RegOp)
+MLIR_JNI_DEFINE_CLASS_BINDING(RegOp, "FIRRTL/Operations$Register")
+
+/*
+public static native Register build(Builder builder, Location location, Type
+elementType, Value clock, String name, NameKind nameKind, boolean isForceable);
+        */
+JNIEXPORT jobject JNICALL Java_FIRRTL_Operations_00024Register_build(
+    JNIEnv *env, jclass, jobject jBuilder, jobject jLoc, jobject jType,
+    jobject jValue, jstring jName, jobject jNameKind, jboolean isForceable) {
+  auto builder = JNIBuilder(env, jBuilder);
+  auto loc = builder.unwrap<mlir::Location>(jLoc);
+  auto type = builder.unwrap<mlir::Type>(jType);
+  auto value = builder.unwrap<mlir::Value>(jValue);
+  auto name = builder.unwrap<mlir::StringAttr>(jName);
+  auto nameKind = builder.unwrap<circt::firrtl::NameKindEnumAttr>(jNameKind);
+  auto annotations =
+      builder->getArrayAttr(llvm::SmallVector<mlir::Attribute>{});
+  auto innerSymAttr = circt::hw::InnerSymAttr();
+  auto forceableAttr = isForceable ? mlir::UnitAttr() : nullptr;
+  auto op = builder->create<RegOp>(loc, type, value, name, nameKind,
+                                   annotations, innerSymAttr, forceableAttr);
+  return builder.wrap(op);
 }

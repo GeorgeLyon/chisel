@@ -10,4 +10,14 @@ public class Attributes extends MLIR.Attributes {
 			super(reference);
 		}
 	}
+
+	public static class NameKind extends Attribute {
+		public static native NameKind getDroppable(Context context);
+
+		public static native NameKind getInteresting(Context context);
+
+		protected NameKind(long reference) {
+			super(reference);
+		}
+	}
 }

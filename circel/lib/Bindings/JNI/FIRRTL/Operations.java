@@ -39,7 +39,18 @@ public class Operations extends MLIR.Operations {
 
 		private native BlockArgument addPort(Builder builder, String name, Type type, boolean directionIsIn);
 
+		public native Block getBody(Builder builder);
+
 		protected Module(long reference) {
+			super(reference);
+		}
+	}
+
+	public static class Register extends Operation {
+		public static native Register build(Builder builder, Location location, Type elementType, Value clock,
+				String name, NameKind nameKind, boolean isForceable);
+
+		protected Register(long reference) {
 			super(reference);
 		}
 	}
