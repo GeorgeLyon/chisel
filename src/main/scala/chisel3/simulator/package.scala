@@ -2,6 +2,7 @@ package chisel3
 
 import svsim._
 import chisel3.reflect.DataMirror
+import circt.stage.CIRCTTarget
 
 package object simulator {
 
@@ -95,7 +96,7 @@ package object simulator {
       // Use CIRCT to generate SystemVerilog sources, and potentially additional artifacts
       var someDut: Option[T] = None
       val outputAnnotations = (new circt.stage.ChiselStage).execute(
-        Array("--target", "systemverilog", "--split-verilog"),
+        Array(),
         Seq(
           chisel3.stage.ChiselGeneratorAnnotation { () =>
             val dut = generateModule()
@@ -103,6 +104,7 @@ package object simulator {
             dut
           },
           circt.stage.FirtoolOption("-disable-annotation-unknown"),
+          circt.stage.CIRCTTargetAnnotation(CIRCTTarget.FIRRTL),
           firrtl.options.TargetDirAnnotation(workspace.supportArtifactsPath)
         )
       )
