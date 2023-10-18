@@ -2,8 +2,6 @@
 #define CIRCEL_BINDINGS_SUPPORT_SCOPE_ID_H_
 
 #include <cassert>
-#include <cstdint>
-#include <limits>
 #include <mutex>
 #include <type_traits>
 
@@ -19,7 +17,7 @@ template <typename RawValue, RawValue start, int step> class ScopeID {
     RawValue next = start;
 
   public:
-    Generator() {}
+    Generator() = default;
 
     RawValue generate() {
       std::lock_guard<std::mutex> lock(mutex);

@@ -22,6 +22,25 @@ public class Operations extends MLIR.Operations {
 	public static class Module extends Operation {
 		public static native Module build(Builder builder, Location location, String name, Convention convention);
 
+		public enum PortDirection {
+			In, Out
+		}
+
+		public void addPort(Builder builder, String name, Type type, PortDirection direction) {
+			switch (direction) {
+			case In:
+				addPort(builder, name, type, true);
+				break;
+			case Out:
+				addPort(builder, name, type, false);
+				break;
+			default:
+				throw new IllegalArgumentException("Invalid direction: " + direction);
+			}
+		}
+
+		private native void addPort(Builder builder, String name, Type type, boolean directionIsIn);
+
 		protected Module(long reference) {
 			super(reference);
 		}

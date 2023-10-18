@@ -43,11 +43,13 @@ public class FIRRTLJNITests {
 
 					FIRRTL.Operations.Module module = FIRRTL.Operations.Module.build(builder, loc, "test", scalarized);
 
+					module.addPort(builder, "clock", clockType, FIRRTL.Operations.Module.PortDirection.In);
+
 					/*-
 					// CHECK-NEXT: // -----// IR Dump //----- //
 					// CHECK-NEXT: module {
 					// CHECK-NEXT:	 firrtl.circuit "test" {
-					// CHECK-NEXT:     firrtl.module @test() attributes {convention = #firrtl<convention scalarized>} {
+					// CHECK-NEXT:     firrtl.module @test(in %clock: !firrtl.clock) attributes {convention = #firrtl<convention scalarized>} {
 					// CHECK-NEXT:     }
 					// CHECK-NEXT:   }
 					// CHECK-NEXT: }
