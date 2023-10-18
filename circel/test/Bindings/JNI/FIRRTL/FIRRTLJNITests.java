@@ -90,8 +90,8 @@ public class FIRRTLJNITests {
 					builder.setInsertionPointToStart(module.getBody(builder));
 
 					/*-
-					// CHECK-NEXT: %x = firrtl.reg %clock {firrtl.random_init_start = 0 : ui64} : !firrtl.clock, !firrtl.uint<32>
-					// CHECK-NEXT: %y = firrtl.reg %clock {firrtl.random_init_start = 32 : ui64} : !firrtl.clock, !firrtl.uint<32>
+					// CHECK-NEXT: %x = firrtl.reg %clock : !firrtl.clock, !firrtl.uint<32>
+					// CHECK-NEXT: %y = firrtl.reg %clock : !firrtl.clock, !firrtl.uint<32>
 					*/
 					Register x = Register.build(builder, loc, uintValueType, clockPort, "x",
 							NameKind.getDroppable(context), false);
