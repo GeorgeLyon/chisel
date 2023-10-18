@@ -64,7 +64,7 @@ jobs:
             circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-
             circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-
             circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-
-            circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}
+            circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-
       
       - name: Initialize ccache
         uses: devcontainers/ci@v0.3
@@ -126,7 +126,7 @@ jobs:
         if: steps.check-targets.outcome == 'success'
         with: 
           path: ccache
-          key: circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('./**') }}
+          key: circel-ccache-database-${{ steps.get-cache-key-parts.outputs.ubuntu-codename }}-${{ steps.get-cache-key-parts.outputs.llvm-hash }}-${{ steps.get-cache-key-parts.outputs.circt-hash }}-${{ hashFiles('.devcontainer/**') }}-${{ hashFiles('circel/**') }}
       # If evicting everything that wasn't used this workflow does not reduce the cache past its maximum, it may benefit performance to increase the cache size.
       - name: Log ccache estimated usage
         uses: devcontainers/ci@v0.3
