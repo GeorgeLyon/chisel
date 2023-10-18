@@ -16,6 +16,21 @@
     {
       "type": "lldb",
       "request": "launch",
+      "name": "Debug firtool GCD test",
+      "program": "${workspaceFolder}/build/circel/bin/firtool",
+      "args": [
+        "--verilog",
+        "test_run_dir/simulator/GCDSimulator/support-artifacts/GCD.fir"
+      ],
+      "env": {
+        "MLIRJNI_LIB_PATH": "${workspaceFolder}/build/circel/lib/libFIRRTLJNI.jni"
+      },
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build CIRCEL"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
       "name": "Debug MLIR JNI Test",
       "program": "${workspaceFolder}/build/circel/bin/circel-java-test-launcher",
       "args": [

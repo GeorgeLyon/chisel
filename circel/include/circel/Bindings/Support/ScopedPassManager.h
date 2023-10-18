@@ -22,6 +22,7 @@ public:
 
   mlir::PassManager *operator->();
 
+  mlir::PassManager &getPassManager() { return *operator->(); }
   ScopedBuilder getBuilder() const;
 
   void setShouldInvalidateBuilderAfterRun(bool flag = true);

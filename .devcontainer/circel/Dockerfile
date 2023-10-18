@@ -157,6 +157,7 @@ RUN \
         rm -rf /var/lib/apt/lists/* \
         ;; \
       "dev") \
+        # Install additional development tools
         apt-get install -y git \
         ;; \
       *) \

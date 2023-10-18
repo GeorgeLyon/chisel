@@ -12,7 +12,7 @@ namespace circel {
 class JNIPassManager {
 public:
   JNIPassManager(JNIEnv *env, ScopedPassManager passManager)
-      : env(env), passManager(passManager) {}
+      : env(env), passManager(std::move(passManager)) {}
   JNIPassManager(JNIEnv *env, jobject passManager);
 
   // -- Accessors
@@ -21,6 +21,7 @@ public:
     return JNIBuilder(env, passManager.getBuilder());
   }
 
+  mlir::PassManager &getPassManager() { return passManager.getPassManager(); }
   ScopedPassManager getScopedPassManager() const { return passManager; }
 
 private:

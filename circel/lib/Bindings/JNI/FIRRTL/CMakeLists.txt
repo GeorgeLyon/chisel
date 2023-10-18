@@ -3,10 +3,12 @@ add_mlir_jni_library(FIRRTLJNI
     Attributes
     Dialect
     Operations
+    PassManager
     Types
 
   ADDITIONAL_JAVA_SOURCES
     NativeLibrary.java
+    FirtoolOptions.java
 
   ADDITIONAL_CPP_SOURCES
   
@@ -16,6 +18,7 @@ add_mlir_jni_library(FIRRTLJNI
   LINK_LIBS 
     PUBLIC
       CIRCTFIRRTL
+      CIRCTFirtool
     PRIVATE
       MLIRIR
       CIRCELBindingsSupport

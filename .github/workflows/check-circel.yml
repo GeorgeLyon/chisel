@@ -15,10 +15,6 @@ jobs:
     strategy:
       matrix:
         devcontainer-name: ["circel"]
-        additional-cmake-flags:
-          - 
-            - -DLLVM_OPTIMIZED_TABLEGEN=OFF
-            - -DLLVM_TARGETS_TO_BUILD=
 
     steps:
       - name: Checkout
@@ -85,7 +81,7 @@ jobs:
           runCmd: |
             export CCACHE_DIR=$PWD/ccache
             git config --global --add safe.directory $PWD
-            ./circel/support/cmake-helper configure ${{ join(matrix.additional-cmake-flags, ' ') }}
+            ./circel/support/cmake-helper configure
 
       # We run the build, once to check the targets and once to log the errors without any progress logs cluttering the output (since it is a trivial incremental build). Please take care to make sure the following two steps stay in sync.
       - name: Check targets
