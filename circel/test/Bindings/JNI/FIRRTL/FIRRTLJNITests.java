@@ -1,5 +1,6 @@
-// RUN: MLIRJNI_LIB_PATH=%MLIR_JNI_LIB_DIR%/libFIRRTLJNI.jni circel-java-test-launcher --class
-// FIRRTLJNITests\$Test 2>&1 | FileCheck %s
+/*-
+// RUN: MLIRJNI_LIB_PATH=%MLIR_JNI_LIB_DIR%/libFIRRTLJNI.jni circel-java-test-launcher --class FIRRTLJNITests\$Test 2>&1 | FileCheck %s
+*/
 
 import MLIR.*;
 import MLIR.Attributes.*;
